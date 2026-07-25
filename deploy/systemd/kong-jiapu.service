@@ -1,0 +1,21 @@
+[Unit]
+Description=孔氏家谱编修平台 (kong-jiapu)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/kong-jiapu/web
+Environment=PATH=%h/.local/node/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOSTNAME=0.0.0.0
+EnvironmentFile=-%h/kong-jiapu/web/.env.local
+# 等 MySQL 就绪（断电重启后常见晚于用户会话启动）
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do mysqladmin ping --silent 2>/dev/null && exit 0; sleep 2; done; echo "MySQL not ready" >&2; exit 1'
+ExecStart=%h/.local/node/bin/npm run start
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

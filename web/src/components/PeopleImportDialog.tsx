@@ -114,7 +114,7 @@ export function PeopleImportDialog({
             <div className="mb-1 font-medium text-ink">填写说明</div>
             <ul className="list-disc space-y-1 pl-4">
               <li>必填：姓名、性别（男/女）、所属派户支</li>
-              <li>当前父建议填「当前父ID」（家谱管理里成员详情可见）；也可只填「当前父姓名」</li>
+              <li>有父时填「当前父姓名」（须能唯一匹配到库中成员）</li>
               <li>是否出嗣 / 是否源自原始谱书：填「是」或「否」</li>
               <li>单次最多 200 行；请直接编辑下载的 .xlsx 后上传（勿另存为 CSV）</li>
             </ul>

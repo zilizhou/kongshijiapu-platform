@@ -8,9 +8,7 @@ export const IMPORT_COLUMNS = [
   { key: "group", header: "所属派户支", required: true, sample: "零,始祖至中興祖" },
   { key: "level", header: "世代", required: false, sample: "70" },
   { key: "rank", header: "当前排行", required: false, sample: "長子" },
-  { key: "parentId", header: "当前父ID", required: false, sample: "" },
   { key: "parentName", header: "当前父姓名", required: false, sample: "" },
-  { key: "birthFatherId", header: "原生父ID", required: false, sample: "" },
   { key: "birthMother", header: "原生母姓名", required: false, sample: "" },
   { key: "currentMother", header: "当前母姓名", required: false, sample: "" },
   { key: "zi", header: "字", required: false, sample: "" },
@@ -49,8 +47,7 @@ export type ImportRowResult = {
 
 function tipForColumn(c: (typeof IMPORT_COLUMNS)[number]): string {
   if (c.required) return "必填";
-  if (c.key === "parentId") return "有父则填成员ID";
-  if (c.key === "parentName") return "或填姓名（唯一）";
+  if (c.key === "parentName") return "姓名须唯一";
   if (c.key === "isHeir" || c.key === "originalData") return "是/否";
   return "";
 }
