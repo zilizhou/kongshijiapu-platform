@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import {
+  deleteOwnRequest,
   getRequestById,
   listEvents,
   reviewerSave,
@@ -42,6 +43,21 @@ export async function PATCH(
     return NextResponse.json({ item });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "保存失败";
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  try {
+    const user = await requireSession();
+    const { id } = await ctx.params;
+    const result = await deleteOwnRequest(Number(id), user);
+    return NextResponse.json(result);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "删除失败";
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }

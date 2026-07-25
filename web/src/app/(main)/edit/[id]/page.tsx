@@ -62,6 +62,58 @@ export default function EditDetailPage() {
   }, [params.id]);
 
   const editable = item && ["draft", "rejected"].includes(item.status);
+  const canWithdraw =
+    item &&
+    ["pending_1", "pending_2", "pending_final"].includes(item.status);
+  const canDelete =
+    item &&
+    ["draft", "rejected", "pending_1", "pending_2", "pending_final"].includes(
+      item.status,
+    );
+
+  async function withdraw() {
+    if (!item) return;
+    if (!confirm("确定撤回提交？单据将回到「暂存」，可再修改后重新提交。")) {
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/requests/${params.id}/withdraw`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "撤回失败");
+      setItem(data.item);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "撤回失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeRequest() {
+    if (!item) return;
+    if (
+      !confirm(
+        "确定删除此编修单？删除后不可恢复（不会改动已通过审核的正式库数据）。",
+      )
+    ) {
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/requests/${params.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "删除失败");
+      router.replace("/edit");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除失败");
+      setSaving(false);
+    }
+  }
 
   async function save(submit: boolean) {
     if (!payload || !item) return;
@@ -195,30 +247,56 @@ export default function EditDetailPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap justify-end gap-2 border-t border-line bg-soft/40 px-5 py-4">
-          <Link href="/edit">
-            <Button variant="secondary" disabled={saving}>
-              取消
-            </Button>
-          </Link>
-          {editable ? (
-            <>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-soft/40 px-5 py-4">
+          <div className="flex flex-wrap gap-2">
+            {canDelete ? (
               <Button
+                variant="danger"
                 disabled={saving}
-                variant="secondary"
-                onClick={() => save(false)}
+                onClick={removeRequest}
               >
-                暂存
+                删除编修单
               </Button>
-              <Button disabled={saving} onClick={() => save(true)}>
-                确认提交
+            ) : null}
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Link href="/edit">
+              <Button variant="secondary" disabled={saving}>
+                返回列表
               </Button>
-            </>
-          ) : (
-            <p className="self-center text-sm text-muted">
-              当前状态不可编辑，仅可查看。
-            </p>
-          )}
+            </Link>
+            {canWithdraw ? (
+              <Button
+                variant="secondary"
+                disabled={saving}
+                onClick={withdraw}
+              >
+                撤回提交
+              </Button>
+            ) : null}
+            {editable ? (
+              <>
+                <Button
+                  disabled={saving}
+                  variant="secondary"
+                  onClick={() => save(false)}
+                >
+                  暂存
+                </Button>
+                <Button disabled={saving} onClick={() => save(true)}>
+                  确认提交
+                </Button>
+              </>
+            ) : !canWithdraw ? (
+              <p className="self-center text-sm text-muted">
+                当前状态不可编辑，仅可查看。
+              </p>
+            ) : (
+              <p className="self-center text-sm text-muted">
+                待审中：可撤回后修改，或删除本编修单。
+              </p>
+            )}
+          </div>
         </div>
       </Card>
     </div>

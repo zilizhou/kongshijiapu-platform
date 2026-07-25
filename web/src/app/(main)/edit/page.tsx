@@ -54,7 +54,7 @@ export default function EditListPage() {
     <div>
       <PageHeader
         title="我的编修"
-        desc="家谱成员与派户支的变更单。未完结修改会合并；审核页可对照高亮修改前后。"
+        desc="家谱成员与派户支的变更单。待审可撤回；未通过的编修单可自行删除。"
         actions={
           <Link href="/edit/new">
             <Button>新增成员</Button>
@@ -166,9 +166,80 @@ export default function EditListPage() {
                   </td>
                   <td className="px-4 py-3 text-muted">{item.updatedAt}</td>
                   <td className="px-4 py-3">
-                    <Link className="text-accent hover:underline" href={`/edit/${item.id}`}>
-                      {["draft", "rejected"].includes(item.status) ? "编辑" : "查看"}
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        className="text-accent hover:underline"
+                        href={`/edit/${item.id}`}
+                      >
+                        {["draft", "rejected"].includes(item.status)
+                          ? "编辑"
+                          : "查看"}
+                      </Link>
+                      {[
+                        "pending_1",
+                        "pending_2",
+                        "pending_final",
+                      ].includes(item.status) ? (
+                        <button
+                          type="button"
+                          className="text-xs text-muted hover:text-ink hover:underline"
+                          onClick={async () => {
+                            if (
+                              !confirm(
+                                "确定撤回提交？单据将回到「暂存」。",
+                              )
+                            ) {
+                              return;
+                            }
+                            const res = await fetch(
+                              `/api/requests/${item.id}/withdraw`,
+                              { method: "POST" },
+                            );
+                            const data = await res.json();
+                            if (!res.ok) {
+                              alert(data.error || "撤回失败");
+                              return;
+                            }
+                            load();
+                          }}
+                        >
+                          撤回
+                        </button>
+                      ) : null}
+                      {[
+                        "draft",
+                        "rejected",
+                        "pending_1",
+                        "pending_2",
+                        "pending_final",
+                      ].includes(item.status) ? (
+                        <button
+                          type="button"
+                          className="text-xs text-danger hover:underline"
+                          onClick={async () => {
+                            if (
+                              !confirm(
+                                "确定删除此编修单？删除后不可恢复。",
+                              )
+                            ) {
+                              return;
+                            }
+                            const res = await fetch(
+                              `/api/requests/${item.id}`,
+                              { method: "DELETE" },
+                            );
+                            const data = await res.json();
+                            if (!res.ok) {
+                              alert(data.error || "删除失败");
+                              return;
+                            }
+                            load();
+                          }}
+                        >
+                          删除
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}

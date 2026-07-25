@@ -490,6 +490,66 @@ export async function rejectRequest(
   return getRequestById(id);
 }
 
+const PENDING_STATUSES: RequestStatus[] = [
+  "pending_1",
+  "pending_2",
+  "pending_final",
+];
+
+function assertOwnOpenRequest(req: ChangeRequest, user: SessionUser) {
+  if (req.submitterId !== user.id && user.role !== "admin") {
+    throw new Error("只能操作自己的变更单");
+  }
+}
+
+/** 录入员撤回已提交的审核：回到暂存，可再改 */
+export async function withdrawRequest(id: number, user: SessionUser) {
+  const req = await getRequestById(id);
+  if (!req) throw new Error("变更单不存在");
+  assertOwnOpenRequest(req, user);
+  if (!PENDING_STATUSES.includes(req.status)) {
+    throw new Error("仅待审状态可撤回提交");
+  }
+  await execute(
+    `UPDATE app_change_requests SET
+       status = 'draft',
+       reject_reason = NULL,
+       submitted_at = NULL,
+       last_actor_id = :actorId,
+       last_actor_name = :actorName
+     WHERE id = :id`,
+    {
+      id,
+      actorId: user.id,
+      actorName: user.displayName,
+    },
+  );
+  await addEvent(id, user, "withdraw", `从 ${req.status} 撤回为暂存`);
+  clearYiziCache();
+  return getRequestById(id);
+}
+
+/** 删除未终审通过的变更单（不改正式库成员） */
+export async function deleteOwnRequest(id: number, user: SessionUser) {
+  const req = await getRequestById(id);
+  if (!req) throw new Error("变更单不存在");
+  assertOwnOpenRequest(req, user);
+  if (req.status === "approved") {
+    throw new Error("已通过的变更单不可删除");
+  }
+  const deletable: RequestStatus[] = [
+    "draft",
+    "rejected",
+    ...PENDING_STATUSES,
+  ];
+  if (!deletable.includes(req.status)) {
+    throw new Error("当前状态不可删除");
+  }
+  await execute(`DELETE FROM app_change_requests WHERE id = :id`, { id });
+  clearYiziCache();
+  return { ok: true as const, id };
+}
+
 function assertCanReview(user: SessionUser, status: RequestStatus) {
   if (user.role === "admin") return;
   if (status === "pending_1" && user.role === "first") return;
