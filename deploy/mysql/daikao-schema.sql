@@ -1,0 +1,58 @@
+-- 待考库：从「待攷支一/二」TXT 原样导入，独立于主谱与续录表
+USE kzjp01;
+
+CREATE TABLE IF NOT EXISTS tb_daikao_people (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  source_file VARCHAR(64) NOT NULL COMMENT '待攷支一 / 待攷支二',
+  source_line INT NOT NULL COMMENT '源文件行号',
+  volume VARCHAR(100) NULL COMMENT '如 孔子世家譜四集卷一',
+  section_path VARCHAR(255) NULL COMMENT '小节路径，如 安徽支/亳州宏依寺村',
+  is_root TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否 *#* 支根',
+  is_out_heir TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否 @** 出嗣相关行',
+  indent_spaces INT NOT NULL DEFAULT 0,
+  name VARCHAR(40) NOT NULL,
+  spectrum_no VARCHAR(20) NULL COMMENT '谱号，如 002222',
+  generation INT NULL COMMENT '代数数字，如 70',
+  generation_label VARCHAR(20) NULL COMMENT '原文代数，如 七十代',
+  group_raw VARCHAR(150) NULL COMMENT '原文派户支三段，逗号拼接',
+  group1 VARCHAR(50) NULL,
+  group2 VARCHAR(50) NULL,
+  group3 VARCHAR(50) NULL,
+  children_sample VARCHAR(255) NULL COMMENT '<子一…>/<子零>',
+  children_with_no VARCHAR(500) NULL COMMENT '带谱号子嗣串',
+  out_heirs VARCHAR(255) NULL COMMENT '出嗣段（若有第三段<>）',
+  description TEXT NULL COMMENT '行末小传',
+  sex VARCHAR(2) NOT NULL DEFAULT '男',
+  spouse VARCHAR(40) NULL,
+  address VARCHAR(255) NULL,
+  parent_id BIGINT NULL COMMENT '本表内父节点 id（导入后回填）',
+  parent_name VARCHAR(40) NULL,
+  parent_no VARCHAR(20) NULL,
+  tree_path VARCHAR(500) NULL COMMENT '导入时临时路径，用于回填 parent_id',
+  raw_line TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  admit_status VARCHAR(20) NOT NULL DEFAULT 'none' COMMENT 'none|pending|admitted',
+  admit_request_id BIGINT NULL COMMENT '进行中的入谱变更单',
+  admitted_people_id INT NULL COMMENT '正式库成员 ID',
+  admitted_at DATETIME NULL,
+  INDEX idx_daikao_source (source_file, source_line),
+  INDEX idx_daikao_admit_status (admit_status),
+  INDEX idx_daikao_admitted_people (admitted_people_id),
+  INDEX idx_daikao_no (spectrum_no),
+  INDEX idx_daikao_name_no (name, spectrum_no),
+  INDEX idx_daikao_volume (volume),
+  INDEX idx_daikao_gen (generation),
+  INDEX idx_daikao_group (group_raw),
+  INDEX idx_daikao_parent (parent_id),
+  INDEX idx_daikao_tree (tree_path(191))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tb_daikao_parse_error (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  source_file VARCHAR(64) NOT NULL,
+  source_line INT NOT NULL,
+  reason VARCHAR(100) NOT NULL,
+  raw_line TEXT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_daikao_err_file (source_file, source_line)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

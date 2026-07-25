@@ -176,6 +176,14 @@ export default function EditDetailPage() {
         </Card>
       ) : null}
 
+      {(payload as PeoplePayload).sourceDaikaoId ? (
+        <Card className="mb-4 border-sky-200 bg-sky-50/70 p-4 text-sm text-sky-950">
+          来源：待考成员 #
+          {(payload as PeoplePayload).sourceDaikaoId}
+          ，入谱申请走审核通过后进入正式家谱。
+        </Card>
+      ) : null}
+
       {item.beforeSnapshot && item.operation !== "create" ? (
         <Card className="mb-4 border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-950">
           琥珀色高亮字段为相对原库数据的修改，下方显示「原值」便于对照。

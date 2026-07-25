@@ -479,4 +479,5 @@ export const emptyPayload = (): PeoplePayload => ({
   professionalTitle: "",
   college: "",
   degree: "",
+  sourceDaikaoId: null,
 });

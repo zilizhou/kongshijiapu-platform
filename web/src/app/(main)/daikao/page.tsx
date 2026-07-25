@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { DaikaoForm, DaikaoFormValue } from "@/components/DaikaoForm";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -14,7 +15,12 @@ import {
   TableScroll,
   tableHeadClass,
 } from "@/components/ui";
-import type { DaikaoRow, DaikaoUpdatePayload, SessionUser } from "@/lib/types";
+import type {
+  DaikaoAdmitStatus,
+  DaikaoRow,
+  DaikaoUpdatePayload,
+  SessionUser,
+} from "@/lib/types";
 
 function dash(v: string | number | null | undefined) {
   if (v == null || String(v).trim() === "") return "-";
@@ -23,6 +29,27 @@ function dash(v: string | number | null | undefined) {
 
 function canEditRole(role: string | undefined) {
   return ["editor", "first", "second", "final", "admin"].includes(role || "");
+}
+
+function admitLabel(s: DaikaoAdmitStatus | undefined) {
+  if (s === "pending") return "审核中";
+  if (s === "admitted") return "已入谱";
+  return "未入谱";
+}
+
+function AdmitPill({ status }: { status: DaikaoAdmitStatus | undefined }) {
+  const s = status || "none";
+  const cls =
+    s === "admitted"
+      ? "bg-emerald-50 text-emerald-800"
+      : s === "pending"
+        ? "bg-amber-50 text-amber-800"
+        : "bg-stone-100 text-stone-600";
+  return (
+    <span className={`inline-flex rounded px-1.5 py-0.5 text-[11px] ${cls}`}>
+      {admitLabel(s)}
+    </span>
+  );
 }
 
 function rowToForm(p: DaikaoRow): DaikaoFormValue {
@@ -83,6 +110,7 @@ export default function DaikaoPage() {
   const [group, setGroup] = useState("");
   const [sourceFile, setSourceFile] = useState("");
   const [volume, setVolume] = useState("");
+  const [admitStatus, setAdmitStatus] = useState("none");
   const [applied, setApplied] = useState({
     name: "",
     no: "",
@@ -90,6 +118,7 @@ export default function DaikaoPage() {
     group: "",
     sourceFile: "",
     volume: "",
+    admitStatus: "none",
   });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -128,6 +157,7 @@ export default function DaikaoPage() {
     if (applied.group) sp.set("group", applied.group);
     if (applied.sourceFile) sp.set("sourceFile", applied.sourceFile);
     if (applied.volume) sp.set("volume", applied.volume);
+    if (applied.admitStatus) sp.set("admitStatus", applied.admitStatus);
     try {
       const res = await fetch(`/api/daikao?${sp}`);
       const data = await res.json();
@@ -149,7 +179,7 @@ export default function DaikaoPage() {
 
   function search() {
     setPage(1);
-    setApplied({ name, no, level, group, sourceFile, volume });
+    setApplied({ name, no, level, group, sourceFile, volume, admitStatus });
   }
 
   function reset() {
@@ -159,6 +189,7 @@ export default function DaikaoPage() {
     setGroup("");
     setSourceFile("");
     setVolume("");
+    setAdmitStatus("none");
     setPage(1);
     setApplied({
       name: "",
@@ -167,6 +198,7 @@ export default function DaikaoPage() {
       group: "",
       sourceFile: "",
       volume: "",
+      admitStatus: "none",
     });
   }
 
@@ -252,7 +284,7 @@ export default function DaikaoPage() {
         title="待考管理"
         desc={
           canEdit
-            ? "浏览待考支人员；录入员与审核员均可直接编辑。修改字段相对原值琥珀色高亮对照。"
+            ? "浏览与编辑待考人员；确认无误后可「申请入谱」，走三审后进入正式家谱。"
             : "浏览待考支人员；当前账号仅可查看。"
         }
       />
@@ -323,6 +355,18 @@ export default function DaikaoPage() {
             placeholder="卷册"
           />
         </FilterField>
+        <FilterField className="w-28">
+          <Select
+            compact
+            value={admitStatus}
+            onChange={(e) => setAdmitStatus(e.target.value)}
+          >
+            <option value="none">未入谱</option>
+            <option value="pending">审核中</option>
+            <option value="admitted">已入谱</option>
+            <option value="">全部状态</option>
+          </Select>
+        </FilterField>
       </FilterBar>
 
       {error ? (
@@ -366,6 +410,7 @@ export default function DaikaoPage() {
                 <th className="px-3 py-2">小节</th>
                 <th className="px-3 py-2">卷册</th>
                 <th className="px-3 py-2">来源</th>
+                <th className="px-3 py-2">入谱</th>
                 <th className="px-3 py-2">操作</th>
               </tr>
             </thead>
@@ -396,6 +441,9 @@ export default function DaikaoPage() {
                   </td>
                   <td className="px-3 py-2 text-muted">{p.sourceFile}</td>
                   <td className="px-3 py-2">
+                    <AdmitPill status={p.admitStatus} />
+                  </td>
+                  <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1">
                       <button
                         type="button"
@@ -413,13 +461,37 @@ export default function DaikaoPage() {
                           编辑
                         </button>
                       ) : null}
+                      {canEdit && (!p.admitStatus || p.admitStatus === "none") ? (
+                        <Link
+                          href={`/edit/new?daikao=${p.id}`}
+                          className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white"
+                        >
+                          申请入谱
+                        </Link>
+                      ) : null}
+                      {p.admitStatus === "pending" && p.admitRequestId ? (
+                        <Link
+                          href={`/edit/${p.admitRequestId}`}
+                          className="rounded bg-amber-700 px-2 py-0.5 text-xs text-white"
+                        >
+                          变更单
+                        </Link>
+                      ) : null}
+                      {p.admitStatus === "admitted" && p.admittedPeopleId ? (
+                        <Link
+                          href={`/people/${p.admittedPeopleId}/lineage`}
+                          className="rounded bg-emerald-800 px-2 py-0.5 text-xs text-white"
+                        >
+                          正式#{p.admittedPeopleId}
+                        </Link>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
               ))}
               {!loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-8 text-center text-muted">
+                  <td colSpan={9} className="px-3 py-8 text-center text-muted">
                     暂无数据
                   </td>
                 </tr>
@@ -462,11 +534,25 @@ export default function DaikaoPage() {
             </div>
 
             <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-              {!canEdit ? (
-                <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                  当前为录入员，仅可浏览，不可保存修改。
-                </div>
-              ) : null}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <AdmitPill status={detail.admitStatus} />
+                {detail.admitStatus === "pending" && detail.admitRequestId ? (
+                  <Link
+                    href={`/edit/${detail.admitRequestId}`}
+                    className="text-accent hover:underline"
+                  >
+                    查看变更单 #{detail.admitRequestId}
+                  </Link>
+                ) : null}
+                {detail.admitStatus === "admitted" && detail.admittedPeopleId ? (
+                  <Link
+                    href={`/people/${detail.admittedPeopleId}/lineage`}
+                    className="text-accent hover:underline"
+                  >
+                    正式成员 #{detail.admittedPeopleId}
+                  </Link>
+                ) : null}
+              </div>
               {editing ? (
                 <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900/80">
                   琥珀色高亮字段为相对库中原值的修改；下方「原值」可对照。
@@ -509,10 +595,17 @@ export default function DaikaoPage() {
               ) : null}
             </div>
 
-            <div className="flex justify-end gap-2 border-t border-line px-4 py-3">
+            <div className="flex flex-wrap justify-end gap-2 border-t border-line px-4 py-3">
               <Button variant="secondary" onClick={closeDetail}>
                 关闭
               </Button>
+              {canEdit &&
+              (!detail.admitStatus || detail.admitStatus === "none") &&
+              !editing ? (
+                <Link href={`/edit/new?daikao=${detail.id}`}>
+                  <Button variant="ok">申请入谱</Button>
+                </Link>
+              ) : null}
               {canEdit && !editing ? (
                 <Button onClick={startEdit}>编辑</Button>
               ) : null}

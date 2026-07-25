@@ -9,6 +9,12 @@ import {
 import { formatDateTime } from "./datetime";
 import { execute, query, withTransaction } from "./db";
 import {
+  assertDaikaoAdmittable,
+  clearDaikaoAdmitPending,
+  getSourceDaikaoId,
+  markDaikaoAdmitPending,
+} from "./daikao";
+import {
   applyPeopleCreate,
   applyPeopleDelete,
   applyPeopleUpdate,
@@ -144,6 +150,15 @@ export async function createRequest(opts: {
   if (objectType === "branch") await ensureBranchObjectType();
   if (objectType === "branch" && opts.operation === "reorder") {
     throw new Error("派户支不支持排行调整");
+  }
+
+  const sourceDaikaoIdEarly = getSourceDaikaoId(opts.payload);
+  if (
+    objectType === "people" &&
+    opts.operation === "create" &&
+    sourceDaikaoIdEarly
+  ) {
+    await assertDaikaoAdmittable(sourceDaikaoIdEarly);
   }
 
   const payload = normalizePayload(objectType, opts.payload) as ChangePayload & {
@@ -288,6 +303,16 @@ export async function createRequest(opts: {
 
   const id = result.insertId;
   await addEvent(id, opts.user, opts.submit ? "submit" : "draft");
+
+  const sourceDaikaoId = getSourceDaikaoId(payload);
+  if (
+    objectType === "people" &&
+    opts.operation === "create" &&
+    sourceDaikaoId
+  ) {
+    await markDaikaoAdmitPending(sourceDaikaoId, id);
+  }
+
   clearYiziCache();
   return getRequestById(id);
 }
@@ -328,6 +353,10 @@ export async function updateRequestDraft(
     },
   );
   await addEvent(id, user, submit ? "submit" : "save");
+  const sourceDaikaoId = getSourceDaikaoId(trad);
+  if (sourceDaikaoId && (submit || req.status === "draft" || req.status === "rejected")) {
+    await markDaikaoAdmitPending(sourceDaikaoId, id);
+  }
   return getRequestById(id);
 }
 
@@ -426,6 +455,19 @@ export async function approveRequest(id: number, user: SessionUser) {
            last_actor_id=?, last_actor_name=? WHERE id=?`,
           [newId, user.id, user.displayName, id],
         );
+        const sourceDaikaoId = getSourceDaikaoId(peoplePayload);
+        if (sourceDaikaoId) {
+          // 事务外也会再写一次；此处用 conn 保证与落库同事务
+          await conn.execute(
+            `UPDATE tb_daikao_people SET
+               admit_status = 'admitted',
+               admit_request_id = ?,
+               admitted_people_id = ?,
+               admitted_at = NOW()
+             WHERE id = ?`,
+            [id, newId, sourceDaikaoId],
+          );
+        }
       } else if (req.operation === "update") {
         if (!req.objectId) throw new Error("缺少成员 ID");
         await applyPeopleUpdate(conn, req.objectId, peoplePayload);
@@ -487,6 +529,10 @@ export async function rejectRequest(
     },
   );
   await addEvent(id, user, "reject", reason.trim());
+  const sourceDaikaoId = getSourceDaikaoId(req.payload);
+  if (sourceDaikaoId) {
+    await clearDaikaoAdmitPending(sourceDaikaoId, id);
+  }
   return getRequestById(id);
 }
 
@@ -525,6 +571,7 @@ export async function withdrawRequest(id: number, user: SessionUser) {
     },
   );
   await addEvent(id, user, "withdraw", `从 ${req.status} 撤回为暂存`);
+  // 撤回后仍为草稿：保持待考 pending，避免重复发起；删除/驳回才清空
   clearYiziCache();
   return getRequestById(id);
 }
@@ -545,7 +592,11 @@ export async function deleteOwnRequest(id: number, user: SessionUser) {
   if (!deletable.includes(req.status)) {
     throw new Error("当前状态不可删除");
   }
+  const sourceDaikaoId = getSourceDaikaoId(req.payload);
   await execute(`DELETE FROM app_change_requests WHERE id = :id`, { id });
+  if (sourceDaikaoId) {
+    await clearDaikaoAdmitPending(sourceDaikaoId, id);
+  }
   clearYiziCache();
   return { ok: true as const, id };
 }

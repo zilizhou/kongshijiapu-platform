@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
       sourceFile: sp.get("sourceFile") || undefined,
       volume: sp.get("volume") || undefined,
       section: sp.get("section") || undefined,
+      admitStatus: sp.get("admitStatus") || undefined,
       page: sp.get("page") ? Number(sp.get("page")) : 1,
       pageSize: sp.get("pageSize") ? Number(sp.get("pageSize")) : 10,
     });

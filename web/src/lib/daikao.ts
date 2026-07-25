@@ -1,9 +1,18 @@
 import { RowDataPacket } from "mysql2";
 import { AuthError } from "./auth";
 import { execute, query } from "./db";
-import { DaikaoRow, DaikaoUpdatePayload, Role, SessionUser } from "./types";
+import { nameToPinyin } from "./pinyin";
+import {
+  DaikaoAdmitStatus,
+  DaikaoRow,
+  DaikaoUpdatePayload,
+  PeoplePayload,
+  Role,
+  SessionUser,
+} from "./types";
 
 const tableExistsCache = new Map<string, boolean>();
+let admitColumnsReady = false;
 
 async function tableExists(name: string) {
   const cached = tableExistsCache.get(name);
@@ -20,6 +29,45 @@ async function tableExists(name: string) {
   return ok;
 }
 
+async function columnExists(table: string, column: string) {
+  const rows = await query<RowDataPacket[]>(
+    `SELECT 1 AS ok
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = :table
+       AND column_name = :column
+     LIMIT 1`,
+    { table, column },
+  );
+  return rows.length > 0;
+}
+
+/** 确保入谱状态列存在（可重复调用） */
+export async function ensureDaikaoAdmitColumns() {
+  if (admitColumnsReady) return;
+  if (!(await tableExists("tb_daikao_people"))) return;
+  if (!(await columnExists("tb_daikao_people", "admit_status"))) {
+    await execute(
+      `ALTER TABLE tb_daikao_people
+         ADD COLUMN admit_status VARCHAR(20) NOT NULL DEFAULT 'none'
+           COMMENT 'none|pending|admitted' AFTER created_at,
+         ADD COLUMN admit_request_id BIGINT NULL
+           COMMENT '进行中的入谱变更单' AFTER admit_status,
+         ADD COLUMN admitted_people_id INT NULL
+           COMMENT '正式库成员 ID' AFTER admit_request_id,
+         ADD COLUMN admitted_at DATETIME NULL AFTER admitted_people_id`,
+    );
+  }
+  try {
+    await execute(
+      `CREATE INDEX idx_daikao_admit_status ON tb_daikao_people (admit_status)`,
+    );
+  } catch {
+    /* index may exist */
+  }
+  admitColumnsReady = true;
+}
+
 export function canEditDaikao(role: Role) {
   return ["editor", "first", "second", "final", "admin"].includes(role);
 }
@@ -30,6 +78,10 @@ export function assertCanEditDaikao(user: SessionUser) {
     err.status = 403;
     throw err;
   }
+}
+
+export function assertCanAdmitDaikao(user: SessionUser) {
+  assertCanEditDaikao(user);
 }
 
 type DaikaoDb = RowDataPacket & {
@@ -59,7 +111,16 @@ type DaikaoDb = RowDataPacket & {
   parent_name: string | null;
   parent_no: string | null;
   created_at: string | Date | null;
+  admit_status?: string | null;
+  admit_request_id?: number | null;
+  admitted_people_id?: number | null;
+  admitted_at?: string | Date | null;
 };
+
+function mapAdmitStatus(v: string | null | undefined): DaikaoAdmitStatus {
+  if (v === "pending" || v === "admitted") return v;
+  return "none";
+}
 
 function mapRow(r: DaikaoDb): DaikaoRow {
   return {
@@ -89,6 +150,12 @@ function mapRow(r: DaikaoDb): DaikaoRow {
     parentName: r.parent_name,
     parentNo: r.parent_no,
     createdAt: r.created_at ? String(r.created_at) : null,
+    admitStatus: mapAdmitStatus(r.admit_status),
+    admitRequestId:
+      r.admit_request_id != null ? Number(r.admit_request_id) : null,
+    admittedPeopleId:
+      r.admitted_people_id != null ? Number(r.admitted_people_id) : null,
+    admittedAt: r.admitted_at ? String(r.admitted_at) : null,
   };
 }
 
@@ -96,7 +163,54 @@ const SELECT_COLS = `id, source_file, source_line, volume, section_path,
   is_root, is_out_heir, name, spectrum_no, generation, generation_label,
   group_raw, group1, group2, group3, children_sample, children_with_no,
   out_heirs, description, sex, spouse, address, parent_id, parent_name,
-  parent_no, created_at`;
+  parent_no, created_at,
+  admit_status, admit_request_id, admitted_people_id, admitted_at`;
+
+export function daikaoToPeoplePayload(
+  d: DaikaoRow,
+  parentId?: number | null,
+): PeoplePayload {
+  const group =
+    d.groupRaw ||
+    [d.group1, d.group2, d.group3].filter(Boolean).join(",") ||
+    "";
+  const sex = d.sex === "女" ? "女" : "男";
+  return {
+    name: d.name,
+    sex,
+    no: d.spectrumNo || "",
+    level: d.generation,
+    group,
+    birthday: "",
+    deathday: "",
+    address: d.address || "",
+    pinyin: nameToPinyin(d.name),
+    alias: "",
+    zi: "",
+    hao: "",
+    nation: "汉",
+    isHeir: d.isOutHeir ? "1" : "0",
+    originalData: "1",
+    ancestralHome: "",
+    lngLat: "",
+    phone: "",
+    parentId: parentId ?? null,
+    birthFatherId: null,
+    birthMother: "",
+    currentMother: "",
+    rank: "",
+    spouse: d.spouse || "",
+    spouseInfo: "",
+    description: d.description || "",
+    volume: d.volume || "",
+    company: "",
+    position: "",
+    professionalTitle: "",
+    college: "",
+    degree: "",
+    sourceDaikaoId: d.id,
+  };
+}
 
 export async function searchDaikao(opts: {
   name?: string;
@@ -106,12 +220,14 @@ export async function searchDaikao(opts: {
   sourceFile?: string;
   volume?: string;
   section?: string;
+  admitStatus?: string;
   page?: number;
   pageSize?: number;
 }) {
   if (!(await tableExists("tb_daikao_people"))) {
     return { items: [] as DaikaoRow[], total: 0, page: 1, pageSize: 10 };
   }
+  await ensureDaikaoAdmitColumns();
 
   const page = Math.max(1, opts.page || 1);
   const pageSize = Math.min(100, Math.max(1, opts.pageSize || 10));
@@ -151,6 +267,10 @@ export async function searchDaikao(opts: {
     where.push("section_path LIKE :section");
     params.section = `%${opts.section.trim()}%`;
   }
+  if (opts.admitStatus?.trim()) {
+    where.push("admit_status = :admitStatus");
+    params.admitStatus = opts.admitStatus.trim();
+  }
 
   const whereSql = where.join(" AND ");
   const countRows = await query<RowDataPacket[]>(
@@ -181,6 +301,7 @@ export async function searchDaikao(opts: {
 
 export async function getDaikaoById(id: number): Promise<DaikaoRow | null> {
   if (!(await tableExists("tb_daikao_people"))) return null;
+  await ensureDaikaoAdmitColumns();
   const rows = await query<DaikaoDb[]>(
     `SELECT ${SELECT_COLS} FROM tb_daikao_people WHERE id = :id LIMIT 1`,
     { id },
@@ -317,6 +438,7 @@ export async function updateDaikao(
 
 export async function getDaikaoChildren(parentId: number) {
   if (!(await tableExists("tb_daikao_people"))) return [] as DaikaoRow[];
+  await ensureDaikaoAdmitColumns();
   const rows = await query<DaikaoDb[]>(
     `SELECT ${SELECT_COLS}
      FROM tb_daikao_people
@@ -325,4 +447,91 @@ export async function getDaikaoChildren(parentId: number) {
     { parentId },
   );
   return rows.map(mapRow);
+}
+
+/** 校验是否可发起入谱；返回当前行 */
+export async function assertDaikaoAdmittable(id: number): Promise<DaikaoRow> {
+  await ensureDaikaoAdmitColumns();
+  const row = await getDaikaoById(id);
+  if (!row) throw new Error("待考成员不存在");
+  if (row.admitStatus === "admitted") {
+    throw new Error(
+      `该成员已入谱${row.admittedPeopleId ? `（正式成员 #${row.admittedPeopleId}）` : ""}`,
+    );
+  }
+  if (row.admitStatus === "pending" && row.admitRequestId) {
+    throw new Error(
+      `入谱申请审核中（变更单 #${row.admitRequestId}），请勿重复申请`,
+    );
+  }
+  return row;
+}
+
+export async function markDaikaoAdmitPending(
+  daikaoId: number,
+  requestId: number,
+) {
+  await ensureDaikaoAdmitColumns();
+  await execute(
+    `UPDATE tb_daikao_people SET
+       admit_status = 'pending',
+       admit_request_id = :requestId,
+       admitted_people_id = NULL,
+       admitted_at = NULL
+     WHERE id = :id`,
+    { id: daikaoId, requestId },
+  );
+}
+
+export async function clearDaikaoAdmitPending(
+  daikaoId: number,
+  requestId?: number | null,
+) {
+  await ensureDaikaoAdmitColumns();
+  if (requestId != null) {
+    await execute(
+      `UPDATE tb_daikao_people SET
+         admit_status = 'none',
+         admit_request_id = NULL
+       WHERE id = :id
+         AND admit_status = 'pending'
+         AND (admit_request_id = :requestId OR admit_request_id IS NULL)`,
+      { id: daikaoId, requestId },
+    );
+  } else {
+    await execute(
+      `UPDATE tb_daikao_people SET
+         admit_status = 'none',
+         admit_request_id = NULL
+       WHERE id = :id AND admit_status = 'pending'`,
+      { id: daikaoId },
+    );
+  }
+}
+
+export async function markDaikaoAdmitted(
+  daikaoId: number,
+  peopleId: number,
+  requestId: number,
+) {
+  await ensureDaikaoAdmitColumns();
+  await execute(
+    `UPDATE tb_daikao_people SET
+       admit_status = 'admitted',
+       admit_request_id = :requestId,
+       admitted_people_id = :peopleId,
+       admitted_at = NOW()
+     WHERE id = :id`,
+    { id: daikaoId, peopleId, requestId },
+  );
+}
+
+export function getSourceDaikaoId(
+  payload: unknown,
+): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const v = (payload as { sourceDaikaoId?: unknown }).sourceDaikaoId;
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }

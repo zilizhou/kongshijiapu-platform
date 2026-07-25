@@ -188,6 +188,20 @@ export default function ReviewDetailPage() {
         actions={<StatusPill status={item.status} />}
       />
 
+      {(payload as PeoplePayload).sourceDaikaoId ? (
+        <Card className="mb-4 border-sky-200 bg-sky-50/70 p-4 text-sm text-sky-950">
+          来源：待考成员 #
+          {(payload as PeoplePayload).sourceDaikaoId}
+          <Link
+            href="/daikao"
+            className="ml-2 text-accent hover:underline"
+          >
+            打开待考管理
+          </Link>
+          （终审通过后写入正式家谱并回写待考状态）
+        </Card>
+      ) : null}
+
       {item.beforeSnapshot && item.operation !== "create" ? (
         <Card className="mb-4 border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-950">
           琥珀色高亮字段为相对库中原值的修改；下方「原值」可对照。一审/二审/终审均可改数据后送下一级（终审改完直接生效）。

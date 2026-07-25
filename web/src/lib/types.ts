@@ -111,6 +111,8 @@ export type PeoplePayload = {
   professionalTitle?: string;
   college?: string;
   degree?: string;
+  /** 来源待考成员 ID；终审通过后回写待考入谱状态 */
+  sourceDaikaoId?: number | null;
 };
 
 export type PeopleRow = {
@@ -196,6 +198,9 @@ export const OBJECT_TYPE_LABEL: Record<ObjectType, string> = {
   branch: "派户支",
 };
 
+/** 待考入谱状态 */
+export type DaikaoAdmitStatus = "none" | "pending" | "admitted";
+
 /** 待考库人员（tb_daikao_people） */
 export type DaikaoRow = {
   id: number;
@@ -224,6 +229,10 @@ export type DaikaoRow = {
   parentName: string | null;
   parentNo: string | null;
   createdAt: string | null;
+  admitStatus: DaikaoAdmitStatus;
+  admitRequestId: number | null;
+  admittedPeopleId: number | null;
+  admittedAt: string | null;
 };
 
 export type DaikaoUpdatePayload = {
