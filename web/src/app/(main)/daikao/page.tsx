@@ -442,6 +442,7 @@ export default function DaikaoPage() {
                     />
                   </th>
                 ) : null}
+                <th className="px-3 py-2">序号</th>
                 <th className="px-3 py-2">姓名</th>
                 <th className="px-3 py-2">谱号</th>
                 <th className="px-3 py-2">代数</th>
@@ -454,7 +455,7 @@ export default function DaikaoPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((p) => (
+              {items.map((p, idx) => (
                 <tr key={p.id} className="border-t border-line/70 hover:bg-soft/60">
                   {canEdit ? (
                     <td className="px-3 py-2">
@@ -478,6 +479,9 @@ export default function DaikaoPage() {
                       )}
                     </td>
                   ) : null}
+                  <td className="px-3 py-2 text-muted">
+                    {(page - 1) * pageSize + idx + 1}
+                  </td>
                   <td className="px-3 py-2 font-medium text-ink">
                     {p.name}
                     {p.isRoot ? (
@@ -553,7 +557,7 @@ export default function DaikaoPage() {
               {!loading && items.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={canEdit ? 10 : 9}
+                    colSpan={canEdit ? 11 : 10}
                     className="px-3 py-8 text-center text-muted"
                   >
                     暂无数据
