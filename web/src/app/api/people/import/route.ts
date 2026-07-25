@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { getPeopleById, searchPeople } from "@/lib/people";
-import { parseImportCsv, type ImportRowResult } from "@/lib/people-import";
+import { parseImportFile, type ImportRowResult } from "@/lib/people-import";
 import { createRequest } from "@/lib/workflow";
 
 const MAX_ROWS = 200;
@@ -37,17 +37,18 @@ export async function POST(req: NextRequest) {
 
     const form = await req.formData();
     const file = form.get("file");
-    const submit = String(form.get("submit") || "1") !== "0";
+    // 默认暂存到「我的编修」，仅显式传 submit=1 时才提交审核
+    const submit = String(form.get("submit") || "0") === "1";
 
     if (!file || !(file instanceof File)) {
-      return NextResponse.json({ error: "请上传 CSV 文件" }, { status: 400 });
+      return NextResponse.json({ error: "请上传 Excel（.xlsx）文件" }, { status: 400 });
     }
     if (file.size > MAX_BYTES) {
       return NextResponse.json({ error: "文件不能超过 2MB" }, { status: 400 });
     }
 
-    const text = await file.text();
-    const parsed = parseImportCsv(text);
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const parsed = await parseImportFile(buffer, file.name || "import.xlsx");
     if (parsed.errors.length && !parsed.rows.length) {
       return NextResponse.json(
         { error: "解析失败", parseErrors: parsed.errors },

@@ -1,3 +1,4 @@
+import ExcelJS from "exceljs";
 import type { PeoplePayload } from "./types";
 
 /** 模板列：与「新增成员」字段对齐（中文表头便于 Excel 填写） */
@@ -46,24 +47,86 @@ export type ImportRowResult = {
   error?: string;
 };
 
-function csvEscape(v: string): string {
-  if (/[",\n\r]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
-  return v;
+function tipForColumn(c: (typeof IMPORT_COLUMNS)[number]): string {
+  if (c.required) return "必填";
+  if (c.key === "parentId") return "有父则填成员ID";
+  if (c.key === "parentName") return "或填姓名（唯一）";
+  if (c.key === "isHeir" || c.key === "originalData") return "是/否";
+  return "";
 }
 
-/** 生成带 BOM 的 CSV，Excel 可直接打开 */
-export function buildImportTemplateCsv(): string {
-  const headers = IMPORT_COLUMNS.map((c) => c.header);
-  const sample = IMPORT_COLUMNS.map((c) => c.sample);
-  const tip = IMPORT_COLUMNS.map((c) =>
-    c.required ? "必填" : c.key === "parentId" ? "有父则填成员ID" : "",
-  );
-  const lines = [
-    headers.map(csvEscape).join(","),
-    tip.map(csvEscape).join(","),
-    sample.map(csvEscape).join(","),
-  ];
-  return `\uFEFF${lines.join("\r\n")}\r\n`;
+/** 生成 Excel 导入模板（.xlsx，无编码问题） */
+export async function buildImportTemplateXlsx(): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "孔氏家谱编修平台";
+  const ws = wb.addWorksheet("成员导入", {
+    views: [{ state: "frozen", ySplit: 1 }],
+  });
+
+  ws.columns = IMPORT_COLUMNS.map((c) => ({
+    header: c.header,
+    key: c.key,
+    width: Math.max(12, Math.min(22, c.header.length * 2 + 4)),
+  }));
+
+  const tipRow = ws.addRow(IMPORT_COLUMNS.map((c) => tipForColumn(c)));
+  tipRow.font = { color: { argb: "FF6B7280" }, size: 10 };
+  tipRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFF3F4F6" },
+  };
+
+  ws.addRow(IMPORT_COLUMNS.map((c) => c.sample));
+
+  const header = ws.getRow(1);
+  header.font = { bold: true };
+  header.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFE8EEF5" },
+  };
+
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
+function cellToString(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number" || typeof v === "boolean") return String(v).trim();
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === "object" && v !== null && "text" in v) {
+    return String((v as { text: unknown }).text ?? "").trim();
+  }
+  if (typeof v === "object" && v !== null && "richText" in v) {
+    const parts = (v as { richText: { text?: string }[] }).richText || [];
+    return parts.map((p) => p.text || "").join("").trim();
+  }
+  if (typeof v === "object" && v !== null && "result" in v) {
+    return cellToString((v as { result: unknown }).result);
+  }
+  return String(v).trim();
+}
+
+async function sheetToTable(buffer: Buffer): Promise<string[][]> {
+  const wb = new ExcelJS.Workbook();
+  // exceljs 类型与当前 Node Buffer 定义不完全兼容
+  await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+  const ws = wb.worksheets[0];
+  if (!ws) return [];
+  const table: string[][] = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    const values = row.values as unknown[];
+    // exceljs row.values 下标从 1 开始
+    const cells: string[] = [];
+    const max = Math.max(values.length - 1, IMPORT_COLUMNS.length);
+    for (let i = 1; i <= max; i++) {
+      cells.push(cellToString(values[i]));
+    }
+    if (cells.some((c) => c !== "")) table.push(cells);
+  });
+  return table;
 }
 
 function parseCsv(text: string): string[][] {
@@ -72,7 +135,6 @@ function parseCsv(text: string): string[][] {
   let cell = "";
   let i = 0;
   let inQuotes = false;
-  // strip BOM
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
 
   while (i < text.length) {
@@ -141,17 +203,10 @@ export type ParsedImportRow = {
   parentName?: string;
 };
 
-/**
- * 解析上传 CSV。支持：
- * - 第 1 行为中文表头
- * - 第 2 行若为「必填」说明则自动跳过
- * - 示例行若姓名=孔範例 且用户未改，也会导入（由用户删除即可）
- */
-export function parseImportCsv(text: string): {
+function parseImportTable(table: string[][]): {
   rows: ParsedImportRow[];
   errors: { row: number; error: string }[];
 } {
-  const table = parseCsv(text);
   if (table.length < 2) {
     return { rows: [], errors: [{ row: 1, error: "文件为空或缺少表头" }] };
   }
@@ -178,7 +233,6 @@ export function parseImportCsv(text: string): {
   }
 
   let dataStart = 1;
-  // 跳过说明行（单元格含「必填」）
   if (table[1]?.some((c) => c.includes("必填"))) dataStart = 2;
 
   const rows: ParsedImportRow[] = [];
@@ -194,7 +248,6 @@ export function parseImportCsv(text: string): {
 
     const name = get("姓名");
     if (!name) {
-      // 空行跳过
       if (line.every((c) => !c.trim())) continue;
       errors.push({ row: r + 1, error: "姓名不能为空" });
       continue;
@@ -274,4 +327,33 @@ export function parseImportCsv(text: string): {
   }
 
   return { rows, errors };
+}
+
+/** 解析上传文件：优先 .xlsx，亦兼容旧 CSV */
+export async function parseImportFile(
+  buffer: Buffer,
+  filename: string,
+): Promise<{
+  rows: ParsedImportRow[];
+  errors: { row: number; error: string }[];
+}> {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) {
+    const table = await sheetToTable(buffer);
+    return parseImportTable(table);
+  }
+  if (lower.endsWith(".xls")) {
+    return {
+      rows: [],
+      errors: [
+        {
+          row: 1,
+          error: "请使用 .xlsx 格式（可用 Excel「另存为」Excel 工作簿）",
+        },
+      ],
+    };
+  }
+  // CSV / 其它按文本解析
+  const text = buffer.toString("utf8");
+  return parseImportTable(parseCsv(text));
 }

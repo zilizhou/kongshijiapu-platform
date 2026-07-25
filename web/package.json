@@ -12,6 +12,7 @@
     "bcryptjs": "^3.0.3",
     "date-fns": "^4.4.0",
     "element-china-area-data": "^6.1.0",
+    "exceljs": "^4.4.0",
     "jose": "^6.2.4",
     "mysql2": "^3.23.1",
     "next": "15.1.0",

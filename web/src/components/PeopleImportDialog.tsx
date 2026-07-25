@@ -15,7 +15,7 @@ export function PeopleImportDialog({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [submit, setSubmit] = useState(true);
+  const [submit, setSubmit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [summary, setSummary] = useState<{
@@ -38,7 +38,7 @@ export function PeopleImportDialog({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "家谱成员导入模板.csv";
+      a.download = "家谱成员导入模板.xlsx";
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -48,7 +48,7 @@ export function PeopleImportDialog({
 
   async function runImport() {
     if (!file) {
-      setError("请先选择 CSV 文件");
+      setError("请先选择 Excel 文件");
       return;
     }
     setBusy(true);
@@ -97,7 +97,7 @@ export function PeopleImportDialog({
           <div>
             <div className="font-display text-lg text-ink">批量导入成员</div>
             <div className="mt-0.5 text-xs text-muted">
-              先下载模板填写，再上传 CSV；成功后进入编修/审核流程（非直接写入正式库）
+              先下载 Excel 模板填写，再上传；成功后进入编修/审核流程（非直接写入正式库）
             </div>
           </div>
           <button
@@ -116,7 +116,7 @@ export function PeopleImportDialog({
               <li>必填：姓名、性别（男/女）、所属派户支</li>
               <li>当前父建议填「当前父ID」（家谱管理里成员详情可见）；也可只填「当前父姓名」</li>
               <li>是否出嗣 / 是否源自原始谱书：填「是」或「否」</li>
-              <li>单次最多 200 行；用 Excel 打开模板后另存为 CSV UTF-8</li>
+              <li>单次最多 200 行；请直接编辑下载的 .xlsx 后上传（勿另存为 CSV）</li>
             </ul>
           </div>
 
@@ -125,7 +125,7 @@ export function PeopleImportDialog({
               下载导入模板
             </Button>
             <span className="text-xs text-muted">
-              模板含表头、说明行与一行示例，可删改后上传
+              Excel 模板（.xlsx）含表头、说明行与一行示例，可删改后上传
             </span>
           </div>
 
@@ -134,7 +134,7 @@ export function PeopleImportDialog({
             <input
               ref={inputRef}
               type="file"
-              accept=".csv,text/csv"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="block w-full text-sm"
               onChange={(e) => {
                 setFile(e.target.files?.[0] || null);

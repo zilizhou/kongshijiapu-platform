@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
-import { buildImportTemplateCsv } from "@/lib/people-import";
+import { buildImportTemplateXlsx } from "@/lib/people-import";
 
 export async function GET() {
   try {
@@ -8,12 +8,13 @@ export async function GET() {
     if (user.role !== "editor" && user.role !== "admin") {
       return NextResponse.json({ error: "仅录入员或管理员可下载模板" }, { status: 403 });
     }
-    const csv = buildImportTemplateCsv();
-    const filename = `家谱成员导入模板.csv`;
-    return new NextResponse(csv, {
+    const buf = await buildImportTemplateXlsx();
+    const filename = `家谱成员导入模板.xlsx`;
+    return new NextResponse(new Uint8Array(buf), {
       status: 200,
       headers: {
-        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
         "Cache-Control": "no-store",
       },
