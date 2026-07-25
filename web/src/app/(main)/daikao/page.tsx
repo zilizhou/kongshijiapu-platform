@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { DaikaoBatchAdmitDialog } from "@/components/DaikaoBatchAdmitDialog";
 import { DaikaoForm, DaikaoFormValue } from "@/components/DaikaoForm";
 import { PaginationBar } from "@/components/PaginationBar";
 import {
@@ -135,8 +136,25 @@ export default function DaikaoPage() {
   const [baseline, setBaseline] = useState<DaikaoFormValue | null>(null);
   const [saving, setSaving] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [selected, setSelected] = useState<Record<number, boolean>>({});
+  const [batchOpen, setBatchOpen] = useState(false);
 
   const canEdit = canEditRole(user?.role);
+
+  const selectableIds = useMemo(
+    () =>
+      items
+        .filter((p) => !p.admitStatus || p.admitStatus === "none")
+        .map((p) => p.id),
+    [items],
+  );
+  const selectedIds = useMemo(
+    () => selectableIds.filter((id) => selected[id]),
+    [selectableIds, selected],
+  );
+  const allPageSelected =
+    selectableIds.length > 0 &&
+    selectableIds.every((id) => selected[id]);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -164,6 +182,7 @@ export default function DaikaoPage() {
       if (!res.ok) throw new Error(data.error || "查询失败");
       setItems(data.items || []);
       setTotal(data.total || 0);
+      setSelected({});
     } catch (e) {
       setError(e instanceof Error ? e.message : "查询失败");
     } finally {
@@ -376,12 +395,25 @@ export default function DaikaoPage() {
       ) : null}
 
       <Card>
-        <div className="flex items-center justify-between border-b border-line px-4 py-3 text-sm text-muted">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 text-sm text-muted">
           <span>
             共 {total} 人
             {loading ? " · 加载中…" : ""}
+            {canEdit && selectedIds.length ? (
+              <span className="ml-2 text-ink">
+                · 已选 {selectedIds.length} 人（未入谱）
+              </span>
+            ) : null}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {canEdit ? (
+              <Button
+                disabled={!selectedIds.length}
+                onClick={() => setBatchOpen(true)}
+              >
+                批量申请入谱
+              </Button>
+            ) : null}
             <span>每页</span>
             <Select
               className="w-20"
@@ -403,6 +435,28 @@ export default function DaikaoPage() {
           <table className="min-w-full text-left text-sm">
             <thead className={tableHeadClass}>
               <tr>
+                {canEdit ? (
+                  <th className="w-10 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      className="accent-accent"
+                      checked={allPageSelected}
+                      disabled={!selectableIds.length}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setSelected((prev) => {
+                          const next = { ...prev };
+                          for (const id of selectableIds) {
+                            if (on) next[id] = true;
+                            else delete next[id];
+                          }
+                          return next;
+                        });
+                      }}
+                      title="全选本页未入谱"
+                    />
+                  </th>
+                ) : null}
                 <th className="px-3 py-2">姓名</th>
                 <th className="px-3 py-2">谱号</th>
                 <th className="px-3 py-2">代数</th>
@@ -417,6 +471,28 @@ export default function DaikaoPage() {
             <tbody>
               {items.map((p) => (
                 <tr key={p.id} className="border-t border-line/70 hover:bg-soft/60">
+                  {canEdit ? (
+                    <td className="px-3 py-2">
+                      {!p.admitStatus || p.admitStatus === "none" ? (
+                        <input
+                          type="checkbox"
+                          className="accent-accent"
+                          checked={Boolean(selected[p.id])}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setSelected((prev) => {
+                              const next = { ...prev };
+                              if (on) next[p.id] = true;
+                              else delete next[p.id];
+                              return next;
+                            });
+                          }}
+                        />
+                      ) : (
+                        <span className="inline-block w-4" />
+                      )}
+                    </td>
+                  ) : null}
                   <td className="px-3 py-2 font-medium text-ink">
                     {p.name}
                     {p.isRoot ? (
@@ -491,7 +567,10 @@ export default function DaikaoPage() {
               ))}
               {!loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-muted">
+                  <td
+                    colSpan={canEdit ? 10 : 9}
+                    className="px-3 py-8 text-center text-muted"
+                  >
                     暂无数据
                   </td>
                 </tr>
@@ -627,6 +706,16 @@ export default function DaikaoPage() {
           </div>
         </div>
       ) : null}
+
+      <DaikaoBatchAdmitDialog
+        open={batchOpen}
+        ids={selectedIds}
+        onClose={() => setBatchOpen(false)}
+        onDone={() => {
+          setSelected({});
+          load();
+        }}
+      />
     </div>
   );
 }

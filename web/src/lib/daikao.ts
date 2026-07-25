@@ -1,6 +1,7 @@
 import { RowDataPacket } from "mysql2";
 import { AuthError } from "./auth";
 import { execute, query } from "./db";
+import { searchPeople } from "./people";
 import { nameToPinyin } from "./pinyin";
 import {
   DaikaoAdmitStatus,
@@ -10,6 +11,7 @@ import {
   Role,
   SessionUser,
 } from "./types";
+import { searchTextVariants } from "./zh";
 
 const tableExistsCache = new Map<string, boolean>();
 let admitColumnsReady = false;
@@ -447,6 +449,152 @@ export async function getDaikaoChildren(parentId: number) {
     { parentId },
   );
   return rows.map(mapRow);
+}
+
+export type OfficialParentCandidate = {
+  id: number;
+  name: string;
+  sex: string;
+  level: number | null;
+  groupName: string | null;
+  parentName: string | null;
+};
+
+export type OfficialParentResolve = {
+  parentId: number | null;
+  parentMatch: "none" | "unique" | "ambiguous";
+  parentName: string;
+  parentCandidates: OfficialParentCandidate[];
+};
+
+/** 按姓名在正式库匹配当前父 */
+export async function resolveOfficialParent(
+  parentNameRaw: string | null | undefined,
+): Promise<OfficialParentResolve> {
+  const parentName = (parentNameRaw || "").trim();
+  if (!parentName) {
+    return {
+      parentId: null,
+      parentMatch: "none",
+      parentName: "",
+      parentCandidates: [],
+    };
+  }
+  const found = await searchPeople({ name: parentName, page: 1, pageSize: 50 });
+  const variants = new Set(searchTextVariants(parentName));
+  const exact = found.items.filter((x) => variants.has(x.name));
+  const list = (exact.length ? exact : found.items).map((p) => ({
+    id: p.id,
+    name: p.name,
+    sex: p.sex,
+    level: p.level,
+    groupName: p.groupName,
+    parentName: p.parentName,
+  }));
+  if (exact.length === 1) {
+    return {
+      parentId: exact[0].id,
+      parentMatch: "unique",
+      parentName,
+      parentCandidates: list,
+    };
+  }
+  if (list.length > 1) {
+    return {
+      parentId: null,
+      parentMatch: "ambiguous",
+      parentName,
+      parentCandidates: list,
+    };
+  }
+  if (list.length === 1) {
+    return {
+      parentId: list[0].id,
+      parentMatch: "unique",
+      parentName,
+      parentCandidates: list,
+    };
+  }
+  return {
+    parentId: null,
+    parentMatch: "none",
+    parentName,
+    parentCandidates: [],
+  };
+}
+
+export type AdmitPreviewItem = {
+  id: number;
+  name: string;
+  sex: string;
+  level: number | null;
+  group: string;
+  ok: boolean;
+  error?: string;
+  parentName: string;
+  parentMatch: "none" | "unique" | "ambiguous";
+  parentId: number | null;
+  parentCandidates: OfficialParentCandidate[];
+};
+
+/** 批量入谱预览（不建单） */
+export async function previewDaikaoAdmit(
+  ids: number[],
+): Promise<AdmitPreviewItem[]> {
+  const out: AdmitPreviewItem[] = [];
+  for (const id of ids) {
+    try {
+      const row = await assertDaikaoAdmittable(id);
+      const parent = await resolveOfficialParent(row.parentName);
+      const group =
+        row.groupRaw ||
+        [row.group1, row.group2, row.group3].filter(Boolean).join(",") ||
+        "";
+      let ok = true;
+      let error: string | undefined;
+      if (!row.name?.trim()) {
+        ok = false;
+        error = "姓名为空";
+      } else if (!group.trim()) {
+        ok = false;
+        error = "缺少所属派户支";
+      } else if (parent.parentMatch === "ambiguous") {
+        ok = false;
+        error = `父亲「${parent.parentName}」重名，请选择`;
+      } else if (parent.parentName && parent.parentMatch === "none") {
+        // 有父名但未匹配：仍允许提交（父可空）
+        error = `未匹配到正式库父亲「${parent.parentName}」，将按无父提交`;
+      }
+      out.push({
+        id: row.id,
+        name: row.name,
+        sex: row.sex,
+        level: row.generation,
+        group,
+        ok,
+        error,
+        parentName: parent.parentName,
+        parentMatch: parent.parentMatch,
+        parentId: parent.parentId,
+        parentCandidates: parent.parentCandidates,
+      });
+    } catch (e) {
+      out.push({
+        id,
+        name: "",
+        sex: "",
+        level: null,
+        group: "",
+        ok: false,
+        error: e instanceof Error ? e.message : "不可入谱",
+        parentName: "",
+        parentMatch: "none",
+        parentId: null,
+        parentCandidates: [],
+      });
+    }
+  }
+  return out;
 }
 
 /** 校验是否可发起入谱；返回当前行 */
