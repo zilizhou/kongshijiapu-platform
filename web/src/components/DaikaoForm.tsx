@@ -104,6 +104,7 @@ export function DaikaoForm({
 
   return (
     <div className="grid grid-cols-2 gap-3">
+      {/* 必填项置顶 */}
       <Field label="姓名" required {...mark("name")}>
         <Input
           disabled={disabled}
@@ -111,14 +112,7 @@ export function DaikaoForm({
           onChange={(e) => set("name", e.target.value)}
         />
       </Field>
-      <Field label="谱号" {...mark("spectrumNo")}>
-        <Input
-          disabled={disabled}
-          value={value.spectrumNo}
-          onChange={(e) => set("spectrumNo", e.target.value)}
-        />
-      </Field>
-      <Field label="性别" {...mark("sex")}>
+      <Field label="性别" required {...mark("sex")}>
         <Select
           disabled={disabled}
           value={value.sex}
@@ -128,29 +122,7 @@ export function DaikaoForm({
           <option value="女">女</option>
         </Select>
       </Field>
-      <Field label="代数（数字）" {...mark("generation")}>
-        <Input
-          disabled={disabled}
-          value={value.generation}
-          onChange={(e) => set("generation", e.target.value)}
-          placeholder="70"
-        />
-      </Field>
-      <Field label="代数（原文）" {...mark("generationLabel")}>
-        <Input
-          disabled={disabled}
-          value={value.generationLabel}
-          onChange={(e) => set("generationLabel", e.target.value)}
-          placeholder="七十代"
-        />
-      </Field>
-      <Field label="配偶" {...mark("spouse")}>
-        <Input
-          disabled={disabled}
-          value={value.spouse}
-          onChange={(e) => set("spouse", e.target.value)}
-        />
-      </Field>
+
       <Field label="派1" {...mark("group1")}>
         <Input
           disabled={disabled}
@@ -186,7 +158,59 @@ export function DaikaoForm({
           onChange={(e) => set("parentNo", e.target.value)}
         />
       </Field>
-      <Field label="小节路径" className="col-span-2" {...mark("sectionPath")}>
+      <Field label="谱号" {...mark("spectrumNo")}>
+        <Input
+          disabled={disabled}
+          value={value.spectrumNo}
+          onChange={(e) => set("spectrumNo", e.target.value)}
+        />
+      </Field>
+      <Field label="代数（数字）" {...mark("generation")}>
+        <Input
+          disabled={disabled}
+          value={value.generation}
+          onChange={(e) => set("generation", e.target.value)}
+          placeholder="70"
+        />
+      </Field>
+      <Field label="代数（原文）" {...mark("generationLabel")}>
+        <Input
+          disabled={disabled}
+          value={value.generationLabel}
+          onChange={(e) => set("generationLabel", e.target.value)}
+          placeholder="七十代"
+        />
+      </Field>
+      <Field label="配偶" {...mark("spouse")}>
+        <Input
+          disabled={disabled}
+          value={value.spouse}
+          onChange={(e) => set("spouse", e.target.value)}
+        />
+      </Field>
+      <Field label="支根" {...mark("isRoot")}>
+        <label className="inline-flex h-[38px] items-center gap-1.5 text-sm">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={value.isRoot}
+            onChange={(e) => set("isRoot", e.target.checked)}
+          />
+          是支根
+        </label>
+      </Field>
+      <Field label="出嗣相关" {...mark("isOutHeir")}>
+        <label className="inline-flex h-[38px] items-center gap-1.5 text-sm">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={value.isOutHeir}
+            onChange={(e) => set("isOutHeir", e.target.checked)}
+          />
+          是
+        </label>
+      </Field>
+      <Field label="章节路径" className="col-span-2" {...mark("sectionPath")}>
         <Input
           disabled={disabled}
           value={value.sectionPath}
@@ -235,28 +259,6 @@ export function DaikaoForm({
           value={value.description}
           onChange={(e) => set("description", e.target.value)}
         />
-      </Field>
-      <Field label="支根" {...mark("isRoot")}>
-        <label className="inline-flex h-[38px] items-center gap-1.5 text-sm">
-          <input
-            type="checkbox"
-            disabled={disabled}
-            checked={value.isRoot}
-            onChange={(e) => set("isRoot", e.target.checked)}
-          />
-          是支根
-        </label>
-      </Field>
-      <Field label="出嗣相关" {...mark("isOutHeir")}>
-        <label className="inline-flex h-[38px] items-center gap-1.5 text-sm">
-          <input
-            type="checkbox"
-            disabled={disabled}
-            checked={value.isOutHeir}
-            onChange={(e) => set("isOutHeir", e.target.checked)}
-          />
-          是
-        </label>
       </Field>
     </div>
   );

@@ -146,6 +146,7 @@ export function PeopleForm({
 
   return (
     <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
+      {/* 必填项置顶 */}
       <Field label="姓名" required {...mark("name")}>
         <Input
           disabled={disabled}
@@ -166,6 +167,43 @@ export function PeopleForm({
         />
       </Field>
 
+      <Field label="所属派户支" required {...mark("group")}>
+        <BranchPicker
+          disabled={disabled}
+          value={value.group || ""}
+          onChange={(group) => set("group", group)}
+          placeholder="输入名称搜索派户支"
+        />
+      </Field>
+      <Field label="当前父" required {...mark("parentId")}>
+        <PersonPicker
+          disabled={disabled}
+          valueId={value.parentId}
+          placeholder="输入姓名搜索当前父"
+          onChange={(id) => set("parentId", id)}
+        />
+      </Field>
+
+      <Field label="当前排行" required {...mark("rank")}>
+        <Input
+          disabled={disabled}
+          value={value.rank || ""}
+          onChange={(e) => set("rank", e.target.value)}
+          placeholder="如：长子、次子（也可在世系图拖拽调整）"
+        />
+      </Field>
+      <Field label="世代" {...mark("level")}>
+        <Input
+          disabled={disabled}
+          type="number"
+          value={value.level ?? ""}
+          onChange={(e) =>
+            set("level", e.target.value === "" ? null : Number(e.target.value))
+          }
+          placeholder="请输入世代"
+        />
+      </Field>
+
       {/* 证件号/谱号：暂隐藏，payload.no 仍保留 */}
       <Field label="姓名拼音" {...mark("pinyin")}>
         <Input
@@ -178,6 +216,14 @@ export function PeopleForm({
           placeholder="由姓名自动生成，可改"
         />
         <div className="mt-1 text-xs text-muted">输入姓名后自动填充拼音</div>
+      </Field>
+      <Field label="民族" {...mark("nation")}>
+        <Input
+          disabled={disabled}
+          value={value.nation || ""}
+          onChange={(e) => set("nation", e.target.value)}
+          placeholder="如：汉"
+        />
       </Field>
 
       <Field label="字" {...mark("zi")}>
@@ -219,35 +265,6 @@ export function PeopleForm({
           placeholder="其他别名（不含字/号）"
         />
       </Field>
-      <Field label="民族" {...mark("nation")}>
-        <Input
-          disabled={disabled}
-          value={value.nation || ""}
-          onChange={(e) => set("nation", e.target.value)}
-          placeholder="如：汉"
-        />
-      </Field>
-
-      <Field label="所属派户支" required {...mark("group")}>
-        <BranchPicker
-          disabled={disabled}
-          value={value.group || ""}
-          onChange={(group) => set("group", group)}
-          placeholder="输入名称搜索派户支"
-        />
-      </Field>
-      <Field label="世代" {...mark("level")}>
-        <Input
-          disabled={disabled}
-          type="number"
-          value={value.level ?? ""}
-          onChange={(e) =>
-            set("level", e.target.value === "" ? null : Number(e.target.value))
-          }
-          placeholder="请输入世代"
-        />
-      </Field>
-
       <Field label="是否出嗣" {...mark("isHeir")}>
         <RadioGroup
           disabled={disabled}
@@ -259,6 +276,7 @@ export function PeopleForm({
           ]}
         />
       </Field>
+
       <Field label="是否源自原始谱书" {...mark("originalData")}>
         <RadioGroup
           disabled={disabled}
@@ -268,6 +286,14 @@ export function PeopleForm({
             { value: "0", label: "否" },
             { value: "1", label: "是" },
           ]}
+        />
+      </Field>
+      <Field label="联系电话" {...mark("phone")}>
+        <Input
+          disabled={disabled}
+          value={value.phone || ""}
+          onChange={(e) => set("phone", e.target.value)}
+          placeholder="请输入联系电话"
         />
       </Field>
 
@@ -321,14 +347,6 @@ export function PeopleForm({
         />
       </Field>
 
-      <Field label="联系电话" {...mark("phone")}>
-        <Input
-          disabled={disabled}
-          value={value.phone || ""}
-          onChange={(e) => set("phone", e.target.value)}
-          placeholder="请输入联系电话"
-        />
-      </Field>
       <Field label="原生父" {...mark("birthFatherId")}>
         <PersonPicker
           disabled={disabled}
@@ -337,21 +355,12 @@ export function PeopleForm({
           onChange={(id) => set("birthFatherId", id)}
         />
       </Field>
-
       <Field label="原生母姓名" {...mark("birthMother")}>
         <Input
           disabled={disabled}
           value={value.birthMother || ""}
           onChange={(e) => set("birthMother", e.target.value)}
           placeholder="请输入原生母姓名"
-        />
-      </Field>
-      <Field label="当前父" required {...mark("parentId")}>
-        <PersonPicker
-          disabled={disabled}
-          valueId={value.parentId}
-          placeholder="输入姓名搜索当前父"
-          onChange={(id) => set("parentId", id)}
         />
       </Field>
 
@@ -363,14 +372,7 @@ export function PeopleForm({
           placeholder="请输入当前母姓名"
         />
       </Field>
-      <Field label="当前排行" required {...mark("rank")}>
-        <Input
-          disabled={disabled}
-          value={value.rank || ""}
-          onChange={(e) => set("rank", e.target.value)}
-          placeholder="如：长子、次子（也可在世系图拖拽调整）"
-        />
-      </Field>
+      <div className="hidden md:block" />
 
       <Field label="描述信息" className="md:col-span-2" {...mark("description")}>
         <Textarea
