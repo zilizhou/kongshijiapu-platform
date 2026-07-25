@@ -8,6 +8,10 @@ type Props = {
   onChange: (page: number) => void;
   /** 左侧附加说明，如「共 100 条」 */
   leading?: string;
+  /** 每页条数；提供则显示在分页栏左侧 */
+  pageSize?: number;
+  pageSizeOptions?: number[];
+  onPageSizeChange?: (size: number) => void;
   className?: string;
 };
 
@@ -34,6 +38,9 @@ export function PaginationBar({
   totalPages,
   onChange,
   leading,
+  pageSize,
+  pageSizeOptions = [10, 20, 50],
+  onPageSizeChange,
   className = "",
 }: Props) {
   const pages = Math.max(1, totalPages);
@@ -62,13 +69,31 @@ export function PaginationBar({
   const btnActive =
     "inline-flex h-8 min-w-8 items-center justify-center rounded-md bg-accent px-2 text-sm font-medium text-white";
 
+  const showSize = pageSize != null && typeof onPageSizeChange === "function";
+
   return (
     <div
       className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line px-4 py-3 text-sm ${className}`}
     >
-      <div className="text-muted">
-        {leading ? <span className="mr-3">{leading}</span> : null}
-        第 {current} / {pages} 页
+      <div className="flex flex-wrap items-center gap-2 text-muted">
+        {showSize ? (
+          <select
+            className="h-8 rounded-md border border-line bg-white px-2 text-sm text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+            value={String(pageSize)}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+            aria-label="每页条数"
+          >
+            {pageSizeOptions.map((n) => (
+              <option key={n} value={n}>
+                {n}条/页
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {leading ? <span>{leading}</span> : null}
+        <span>
+          第 {current} / {pages} 页
+        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">

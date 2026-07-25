@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { BranchForm, emptyBranchPayload } from "@/components/BranchForm";
+import { PaginationBar } from "@/components/PaginationBar";
 import {
   Button,
   Card,
@@ -63,7 +64,6 @@ export default function BranchesPage() {
   const [parents, setParents] = useState<ParentOpt[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [gotoPage, setGotoPage] = useState("");
   const [detail, setDetail] = useState<BranchRow | null>(null);
   const [editItem, setEditItem] = useState<BranchRow | null>(null);
   const [creating, setCreating] = useState(false);
@@ -110,13 +110,6 @@ export default function BranchesPage() {
   }, [load]);
 
   const pages = Math.max(1, Math.ceil(total / pageSize));
-  const pageNums = useMemo(() => {
-    const arr: number[] = [];
-    const start = Math.max(1, page - 2);
-    const end = Math.min(pages, start + 5);
-    for (let i = start; i <= end; i++) arr.push(i);
-    return arr;
-  }, [page, pages]);
 
   function resetFilters() {
     setName("");
@@ -430,68 +423,18 @@ export default function BranchesPage() {
           </table>
         </TableScroll>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-sm text-muted">
-          <div>共 {shown.length} / {total} 条</div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              className="w-auto"
-              value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-            >
-              {[10, 20, 50, 100].map((n) => (
-                <option key={n} value={n}>
-                  {n}条/页
-                </option>
-              ))}
-            </Select>
-            <button
-              type="button"
-              className="rounded border border-line px-2 py-1 disabled:opacity-40"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              上一页
-            </button>
-            {pageNums.map((n) => (
-              <button
-                key={n}
-                type="button"
-                className={`min-w-8 rounded px-2 py-1 ${
-                  n === page ? "bg-accent text-white" : "border border-line"
-                }`}
-                onClick={() => setPage(n)}
-              >
-                {n}
-              </button>
-            ))}
-            <button
-              type="button"
-              className="rounded border border-line px-2 py-1 disabled:opacity-40"
-              disabled={page >= pages}
-              onClick={() => setPage((p) => Math.min(pages, p + 1))}
-            >
-              下一页
-            </button>
-            <span>
-              前往
-              <input
-                className="mx-1 w-12 rounded border border-line px-1 py-0.5 text-center"
-                value={gotoPage}
-                onChange={(e) => setGotoPage(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    const n = Number(gotoPage);
-                    if (Number.isFinite(n) && n >= 1 && n <= pages) setPage(n);
-                  }
-                }}
-              />
-              页
-            </span>
-          </div>
-        </div>
+        <PaginationBar
+          page={page}
+          totalPages={pages}
+          onChange={setPage}
+          leading={`共 ${shown.length} / ${total} 条`}
+          pageSize={pageSize}
+          pageSizeOptions={[10, 20, 50, 100]}
+          onPageSizeChange={(n) => {
+            setPageSize(n);
+            setPage(1);
+          }}
+        />
       </Card>
 
       {detail ? (

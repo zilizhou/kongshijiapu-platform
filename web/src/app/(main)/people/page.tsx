@@ -6,13 +6,13 @@ import {
   ReactNode,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import { PeopleRow, SessionUser } from "@/lib/types";
 import { BranchPicker } from "@/components/BranchPicker";
 import { PeopleImportDialog } from "@/components/PeopleImportDialog";
+import { PaginationBar } from "@/components/PaginationBar";
 import {
   Button,
   Card,
@@ -106,7 +106,6 @@ export default function PeoplePage() {
   const [error, setError] = useState("");
   const [drawer, setDrawer] = useState<PeopleRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [gotoPage, setGotoPage] = useState("");
   const loadSeq = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -237,22 +236,6 @@ export default function PeoplePage() {
 
   const canEdit = user?.role === "editor" || user?.role === "admin";
   const pages = Math.max(1, Math.ceil(total / pageSize));
-
-  const pageNumbers = useMemo(() => {
-    const list: (number | "...")[] = [];
-    if (pages <= 7) {
-      for (let i = 1; i <= pages; i++) list.push(i);
-      return list;
-    }
-    list.push(1);
-    if (page > 3) list.push("...");
-    for (let i = Math.max(2, page - 1); i <= Math.min(pages - 1, page + 1); i++) {
-      list.push(i);
-    }
-    if (page < pages - 2) list.push("...");
-    list.push(pages);
-    return list;
-  }, [page, pages]);
 
   async function openDrawer(p: PeopleRow) {
     setDrawer(p);
@@ -568,72 +551,18 @@ export default function PeoplePage() {
           </table>
         </TableScroll>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-sm text-muted">
-          <span>共 {total.toLocaleString()} 条</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              className="w-28"
-              value={String(pageSize)}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-            >
-              <option value="10">10条/页</option>
-              <option value="20">20条/页</option>
-              <option value="50">50条/页</option>
-            </Select>
-            <button
-              type="button"
-              disabled={page <= 1}
-              className="rounded border border-line px-2 py-1 disabled:opacity-40"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              ‹
-            </button>
-            {pageNumbers.map((n, i) =>
-              n === "..." ? (
-                <span key={`e-${i}`} className="px-1">
-                  …
-                </span>
-              ) : (
-                <button
-                  key={n}
-                  type="button"
-                  className={`min-w-8 rounded px-2 py-1 ${
-                    n === page
-                      ? "bg-accent text-white"
-                      : "border border-line hover:bg-soft"
-                  }`}
-                  onClick={() => setPage(n)}
-                >
-                  {n}
-                </button>
-              ),
-            )}
-            <button
-              type="button"
-              disabled={page >= pages}
-              className="rounded border border-line px-2 py-1 disabled:opacity-40"
-              onClick={() => setPage((p) => Math.min(pages, p + 1))}
-            >
-              ›
-            </button>
-            <span className="ml-1">前往</span>
-            <input
-              className="w-14 rounded border border-line px-2 py-1 text-center outline-none focus:border-accent"
-              value={gotoPage}
-              onChange={(e) => setGotoPage(e.target.value.replace(/\D/g, ""))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  const n = Number(gotoPage);
-                  if (n >= 1 && n <= pages) setPage(n);
-                }
-              }}
-            />
-            <span>页</span>
-          </div>
-        </div>
+        <PaginationBar
+          page={page}
+          totalPages={pages}
+          onChange={setPage}
+          leading={`共 ${total.toLocaleString()} 条`}
+          pageSize={pageSize}
+          pageSizeOptions={[10, 20, 50]}
+          onPageSizeChange={(n) => {
+            setPageSize(n);
+            setPage(1);
+          }}
+        />
       </Card>
 
       {drawer ? (

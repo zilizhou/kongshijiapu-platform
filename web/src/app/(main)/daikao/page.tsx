@@ -414,21 +414,6 @@ export default function DaikaoPage() {
                 批量申请入谱
               </Button>
             ) : null}
-            <span>每页</span>
-            <Select
-              className="w-20"
-              value={String(pageSize)}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setPage(1);
-              }}
-            >
-              {[10, 20, 50].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </Select>
           </div>
         </div>
         <TableScroll>
@@ -584,6 +569,12 @@ export default function DaikaoPage() {
           totalPages={pages}
           onChange={setPage}
           leading={`共 ${total} 人`}
+          pageSize={pageSize}
+          pageSizeOptions={[10, 20, 50]}
+          onPageSizeChange={(n) => {
+            setPageSize(n);
+            setPage(1);
+          }}
         />
       </Card>
 
