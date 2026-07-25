@@ -22,7 +22,7 @@ function dash(v: string | number | null | undefined) {
 }
 
 function canEditRole(role: string | undefined) {
-  return ["first", "second", "final", "admin"].includes(role || "");
+  return ["editor", "first", "second", "final", "admin"].includes(role || "");
 }
 
 function rowToForm(p: DaikaoRow): DaikaoFormValue {
@@ -252,8 +252,8 @@ export default function DaikaoPage() {
         title="待考管理"
         desc={
           canEdit
-            ? "浏览待考支人员；一审/二审/终审/管理员可直接编辑。修改字段相对原值琥珀色高亮对照。"
-            : "浏览待考支人员；录入员仅可查看，不可编辑。"
+            ? "浏览待考支人员；录入员与审核员均可直接编辑。修改字段相对原值琥珀色高亮对照。"
+            : "浏览待考支人员；当前账号仅可查看。"
         }
       />
 

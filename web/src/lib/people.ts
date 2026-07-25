@@ -221,7 +221,12 @@ export async function searchPeople(opts: {
 
   // 列表不 JOIN info：导入期 tb_people_info 写入很重，联表会拖到数秒～超时。
   // 详情抽屉走 getPeopleById。
-  const joinRelation = hasRelation
+  // COUNT 勿 JOIN relation：170 万行 LEFT JOIN 计数可达数秒；仅 parentId 筛选时才需要。
+  const needRelationJoin = hasRelation && Boolean(opts.parentId);
+  const joinRelationForCount = needRelationJoin
+    ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
+    : "";
+  const joinRelationForSelect = hasRelation
     ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
     : "";
   const selectParent = hasRelation
@@ -253,7 +258,7 @@ export async function searchPeople(opts: {
   const countRows = await query<RowDataPacket[]>(
     `SELECT COUNT(*) AS c
      FROM tb_people p
-     ${joinRelation}
+     ${joinRelationForCount}
      ${auditJoin}
      WHERE ${whereSql}`,
     params,
@@ -270,7 +275,7 @@ export async function searchPeople(opts: {
             NULL AS F_COLLEGE, NULL AS F_DEGREE,
             ${selectChildCount}
      FROM tb_people p
-     ${joinRelation}
+     ${joinRelationForSelect}
      ${auditJoin}
      WHERE ${whereSql}
      ORDER BY p.F_ID ASC

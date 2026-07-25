@@ -21,12 +21,12 @@ async function tableExists(name: string) {
 }
 
 export function canEditDaikao(role: Role) {
-  return ["first", "second", "final", "admin"].includes(role);
+  return ["editor", "first", "second", "final", "admin"].includes(role);
 }
 
 export function assertCanEditDaikao(user: SessionUser) {
   if (!canEditDaikao(user.role)) {
-    const err = new AuthError("仅一审、二审、终审或管理员可编辑待考数据");
+    const err = new AuthError("当前角色不可编辑待考数据");
     err.status = 403;
     throw err;
   }
