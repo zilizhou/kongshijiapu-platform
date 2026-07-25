@@ -6,8 +6,9 @@ import { OP_LABEL, STATUS_LABEL } from "@/lib/types";
 import {
   Button,
   Card,
+  FilterBar,
+  FilterField,
   Input,
-  Label,
   PageHeader,
   Select,
   StatusPill,
@@ -65,37 +66,54 @@ export default function RecordsPage() {
         desc="追踪你发起或审核过的操作，便于协作对账。"
       />
 
-      <Card className="mb-4 p-4">
-        <div className="grid gap-3 md:grid-cols-4">
-          <div>
-            <Label>操作类型</Label>
-            <Select value={operation} onChange={(e) => setOperation(e.target.value)}>
-              <option value="">全部</option>
-              <option value="create">新增</option>
-              <option value="update">修改</option>
-              <option value="delete">删除</option>
-            </Select>
-          </div>
-          <div>
-            <Label>动作</Label>
-            <Select value={action} onChange={(e) => setAction(e.target.value)}>
-              <option value="">全部</option>
-              <option value="submit">提交</option>
-              <option value="approve_1">一审通过</option>
-              <option value="approve_2">二审通过</option>
-              <option value="approve_final">终审通过</option>
-              <option value="reject">驳回</option>
-            </Select>
-          </div>
-          <div className="md:col-span-2">
-            <Label>关键词</Label>
-            <Input clearable value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-        </div>
-        <div className="mt-3">
-          <Button onClick={() => { setPage(1); load(); }}>筛选</Button>
-        </div>
-      </Card>
+      <FilterBar
+        actions={
+          <Button
+            onClick={() => {
+              setPage(1);
+              load();
+            }}
+          >
+            筛选
+          </Button>
+        }
+      >
+        <FilterField className="w-28">
+          <Select
+            compact
+            value={operation}
+            onChange={(e) => setOperation(e.target.value)}
+          >
+            <option value="">操作类型</option>
+            <option value="create">新增</option>
+            <option value="update">修改</option>
+            <option value="delete">删除</option>
+          </Select>
+        </FilterField>
+        <FilterField className="w-32">
+          <Select
+            compact
+            value={action}
+            onChange={(e) => setAction(e.target.value)}
+          >
+            <option value="">动作</option>
+            <option value="submit">提交</option>
+            <option value="approve_1">一审通过</option>
+            <option value="approve_2">二审通过</option>
+            <option value="approve_final">终审通过</option>
+            <option value="reject">驳回</option>
+          </Select>
+        </FilterField>
+        <FilterField className="min-w-[12rem] flex-1">
+          <Input
+            compact
+            clearable
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="关键词"
+          />
+        </FilterField>
+      </FilterBar>
 
       <Card className="overflow-hidden">
         <TableScroll>

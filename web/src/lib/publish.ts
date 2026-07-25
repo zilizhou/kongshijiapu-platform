@@ -79,6 +79,80 @@ async function tableExists(name: string): Promise<boolean> {
 type ChildRef = { name: string; sex: string };
 
 /**
+ * 库内 F_ADDRESS 常把史传、支系说明、妻/子等粘在住址后。
+ * 出版物只保留「以上住…」的住址段，例如「安徽靈璧縣」。
+ */
+export function trimPublishAddress(raw: string | null | undefined): string {
+  let s = (raw || "").replace(/\s+/g, "").replace(/　+/g, "").trim();
+  if (!s) return "";
+  if (s.startsWith("以上住")) s = s.slice(3);
+
+  // 史传 / 支系说明 / 其它字段误入住址的切点
+  const markers = [
+    "元末",
+    "明末",
+    "清末",
+    "民初",
+    "民國",
+    "民国",
+    "洪武",
+    "永樂",
+    "永乐",
+    "嘉靖",
+    "康熙",
+    "乾隆",
+    "道光",
+    "咸豐",
+    "咸丰",
+    "同治",
+    "光緒",
+    "光绪",
+    "宣統",
+    "宣统",
+    "自先世",
+    "公爲",
+    "公为",
+    "勅授",
+    "敕授",
+    "賜世",
+    "赐世",
+    "有疾",
+    "卒葬",
+    "卒塟",
+    "卒塋",
+    "葬于",
+    "塟",
+    "率領",
+    "率领",
+    "招撫",
+    "招抚",
+    "後敘",
+    "后叙",
+    "後叙",
+    "上代未詳",
+    "上代未详",
+    "妻",
+  ];
+  let cut = s.length;
+  for (const m of markers) {
+    const i = s.indexOf(m);
+    if (i >= 0 && i < cut) cut = i;
+  }
+  const birthIdx = s.search(/[一二三四五六七八九〇零\d]{2,4}年生/);
+  if (birthIdx >= 0 && birthIdx < cut) cut = birthIdx;
+  const sonsIdx = s.search(/子女?[零一二三四五六七八九十\d]+/);
+  if (sonsIdx >= 0 && sonsIdx < cut) cut = sonsIdx;
+
+  s = s.slice(0, cut).trim();
+  // 仍过长时：保留至首个行政区划后缀（县/市/州等）
+  if (s.length > 18) {
+    const m = s.match(/^(.+?[縣县市州府])/);
+    if (m) s = m[1];
+  }
+  return s;
+}
+
+/**
  * 姓名正下方小字：生年 → 妻 → 子N+名 → 住址
  * 例：一九六五年生妻惠氏子三德成德伦德林以上住水城民主村
  */
@@ -105,11 +179,9 @@ export function composePublishBio(
     parts.push(`子${cnCount(sons.length)}${sons.join("")}`);
   }
 
-  const address = (p.address || "").replace(/\s+/g, "").trim();
+  const address = trimPublishAddress(p.address);
   if (address) {
-    parts.push(
-      address.startsWith("以上住") ? address : `以上住${address}`,
-    );
+    parts.push(`以上住${address}`);
   }
 
   return parts.join("");

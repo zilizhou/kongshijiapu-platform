@@ -12,11 +12,13 @@ import {
 } from "react";
 import { PeopleRow, SessionUser } from "@/lib/types";
 import { BranchPicker } from "@/components/BranchPicker";
+import { PeopleImportDialog } from "@/components/PeopleImportDialog";
 import {
   Button,
   Card,
+  FilterBar,
+  FilterField,
   Input,
-  Label,
   Select,
   StatusPill,
   TableScroll,
@@ -103,6 +105,7 @@ export default function PeoplePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [drawer, setDrawer] = useState<PeopleRow | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [gotoPage, setGotoPage] = useState("");
   const loadSeq = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -301,103 +304,101 @@ export default function PeoplePage() {
 
   return (
     <div>
-      <Card className="mb-4 p-4">
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
-          <div>
-            <Label>姓名</Label>
-            <Input
-              clearable
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") applySearch();
-              }}
-              placeholder="请输入姓名"
-            />
-          </div>
-          <div>
-            <Label>性别</Label>
-            <Select value={sex} onChange={(e) => setSex(e.target.value)}>
-              <option value="">请选择性别</option>
-              <option value="男">男</option>
-              <option value="女">女</option>
-            </Select>
-          </div>
-          <div>
-            <Label>所属派户支</Label>
-            <BranchPicker
-              value={group}
-              onChange={setGroup}
-              placeholder="输入名称搜索派户支"
-            />
-          </div>
-          <div>
-            <Label>世代</Label>
-            <Input
-              clearable
-              value={level}
-              onChange={(e) => setLevel(e.target.value)}
-              placeholder="请输入世代"
-            />
-          </div>
-          <div>
-            <Label>地址</Label>
-            <Input
-              clearable
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="请输入地址"
-            />
-          </div>
-        </div>
-
-        {moreFilters ? (
-          <div className="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-5">
-            <div>
-              <Label>谱号</Label>
-              <Input
-                clearable
-                value={no}
-                onChange={(e) => setNo(e.target.value)}
-                placeholder="请输入谱号"
-              />
-            </div>
-          </div>
-        ) : null}
-
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            className="text-sm text-accent hover:underline"
-            onClick={() => setMoreFilters((v) => !v)}
-          >
-            {moreFilters ? "收起" : "展开"}
-          </button>
-          <Button onClick={() => applySearch()}>查询</Button>
-          <Button variant="secondary" onClick={reset}>
-            重置
-          </Button>
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs font-medium text-muted">审核状态</span>
-            <Select
-              className="w-36"
-              value={auditStatus}
-              onChange={(e) => {
-                setAuditStatus(e.target.value);
-                setPage(1);
-              }}
+      <FilterBar
+        actions={
+          <>
+            <button
+              type="button"
+              className="text-xs text-accent hover:underline"
+              onClick={() => setMoreFilters((v) => !v)}
             >
-              <option value="">全部</option>
-              <option value="draft">暂存</option>
-              <option value="pending_1">待一审</option>
-              <option value="pending_2">待二审</option>
-              <option value="pending_final">待终审</option>
-              <option value="approved">终审通过</option>
-              <option value="rejected">已驳回</option>
-            </Select>
-          </div>
-        </div>
-      </Card>
+              {moreFilters ? "收起" : "更多"}
+            </button>
+            <Button onClick={() => applySearch()}>查询</Button>
+            <Button variant="secondary" onClick={reset}>
+              重置
+            </Button>
+          </>
+        }
+      >
+        <FilterField className="w-28">
+          <Input
+            compact
+            clearable
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applySearch();
+            }}
+            placeholder="姓名"
+          />
+        </FilterField>
+        <FilterField className="w-24">
+          <Select
+            compact
+            value={sex}
+            onChange={(e) => setSex(e.target.value)}
+          >
+            <option value="">性别</option>
+            <option value="男">男</option>
+            <option value="女">女</option>
+          </Select>
+        </FilterField>
+        <FilterField className="w-44">
+          <BranchPicker
+            value={group}
+            onChange={setGroup}
+            placeholder="派户支"
+          />
+        </FilterField>
+        <FilterField className="w-24">
+          <Input
+            compact
+            clearable
+            value={level}
+            onChange={(e) => setLevel(e.target.value)}
+            placeholder="世代"
+          />
+        </FilterField>
+        <FilterField className="w-36">
+          <Input
+            compact
+            clearable
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="地址"
+          />
+        </FilterField>
+        <FilterField className="w-32">
+          <Select
+            compact
+            value={auditStatus}
+            onChange={(e) => {
+              setAuditStatus(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">审核状态</option>
+            <option value="draft">暂存</option>
+            <option value="pending_1">待一审</option>
+            <option value="pending_2">待二审</option>
+            <option value="pending_final">待终审</option>
+            <option value="approved">终审通过</option>
+            <option value="rejected">已驳回</option>
+          </Select>
+        </FilterField>
+        {moreFilters ? (
+          <FilterField className="w-32">
+            <Input
+              compact
+              clearable
+              value={no}
+              onChange={(e) => setNo(e.target.value)}
+              placeholder="谱号"
+            />
+          </FilterField>
+        ) : null}
+      </FilterBar>
 
       {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
 
@@ -426,9 +427,14 @@ export default function PeoplePage() {
               </button>
             </div>
             {canEdit ? (
-              <Link href="/edit/new">
-                <Button>新增家谱成员</Button>
-              </Link>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="secondary" onClick={() => setImportOpen(true)}>
+                  批量导入
+                </Button>
+                <Link href="/edit/new">
+                  <Button>新增家谱成员</Button>
+                </Link>
+              </div>
             ) : null}
           </div>
         </div>
@@ -692,6 +698,12 @@ export default function PeoplePage() {
           </div>
         </div>
       ) : null}
+
+      <PeopleImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() => load()}
+      />
     </div>
   );
 }

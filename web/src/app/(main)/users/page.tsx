@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Button,
   Card,
+  FilterBar,
+  FilterField,
   Input,
-  Label,
   PageHeader,
   Select,
   TableScroll,
@@ -196,50 +197,54 @@ export default function UsersPage() {
         actions={<Button onClick={openCreate}>新增账号</Button>}
       />
 
-      <Card className="mb-4 p-4">
-        <div className="grid gap-3 md:grid-cols-3">
-          <div>
-            <Label>角色</Label>
-            <Select value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="">全部</option>
-              {ROLE_OPTIONS.map((r) => (
-                <option key={r.value} value={r.value}>
-                  {r.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="md:col-span-2">
-            <Label>关键词</Label>
-            <Input
-              clearable
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="用户名 / 显示名"
-            />
-          </div>
-        </div>
-        <div className="mt-3 flex gap-2">
-          <Button
-            onClick={() => {
-              setPage(1);
-              load();
-            }}
+      <FilterBar
+        actions={
+          <>
+            <Button
+              onClick={() => {
+                setPage(1);
+                load();
+              }}
+            >
+              查询
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setRole("");
+                setQ("");
+                setPage(1);
+              }}
+            >
+              重置
+            </Button>
+          </>
+        }
+      >
+        <FilterField className="w-32">
+          <Select
+            compact
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
           >
-            查询
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setRole("");
-              setQ("");
-              setPage(1);
-            }}
-          >
-            重置
-          </Button>
-        </div>
-      </Card>
+            <option value="">角色</option>
+            {ROLE_OPTIONS.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </Select>
+        </FilterField>
+        <FilterField className="min-w-[12rem] flex-1">
+          <Input
+            compact
+            clearable
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="用户名 / 显示名"
+          />
+        </FilterField>
+      </FilterBar>
 
       {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
 

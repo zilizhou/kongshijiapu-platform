@@ -184,7 +184,8 @@ export function PublishSheet({
         sorted[0] ||
         40;
 
-      const gapPx = 6;
+      // 与 .publish-person 的 margin-block-end / padding 对齐，避免装箱低估间距
+      const gapPx = 18;
       const next = packPages(
         flat,
         heights,

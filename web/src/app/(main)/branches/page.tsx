@@ -6,6 +6,8 @@ import { BranchForm, emptyBranchPayload } from "@/components/BranchForm";
 import {
   Button,
   Card,
+  FilterBar,
+  FilterField,
   Input,
   PageHeader,
   Select,
@@ -242,71 +244,72 @@ export default function BranchesPage() {
         }
       />
 
-      <Card className="mb-4 p-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <label className="text-sm">
-            <span className="mb-1 block text-muted">派户支名称</span>
-            <Input
-              clearable
-              value={name}
-              placeholder="请输入派户支名称"
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-muted">上级派户支</span>
-            <Select
-              value={parentId}
-              onChange={(e) => setParentId(e.target.value)}
+      <FilterBar
+        actions={
+          <>
+            <Button
+              onClick={() => {
+                setPage(1);
+                load();
+              }}
             >
-              <option value="">全部</option>
-              {parents.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-muted">世代</span>
-            <Input
-              clearable
-              type="number"
-              value={level}
-              placeholder="世代"
-              onChange={(e) => setLevel(e.target.value)}
-            />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-muted">审核状态</span>
-            <Select
-              value={reviewStatus}
-              onChange={(e) => setReviewStatus(e.target.value)}
-            >
-              <option value="">全部</option>
-              <option value="已生效">已生效</option>
-              <option value="暂存">暂存</option>
-              <option value="待一审">待一审</option>
-              <option value="待二审">待二审</option>
-              <option value="待终审">待终审</option>
-              <option value="已驳回">已驳回</option>
-            </Select>
-          </label>
-        </div>
-        <div className="mt-3 flex gap-2">
-          <Button
-            onClick={() => {
-              setPage(1);
-              load();
-            }}
+              查询
+            </Button>
+            <Button variant="secondary" onClick={resetFilters}>
+              重置
+            </Button>
+          </>
+        }
+      >
+        <FilterField className="w-40">
+          <Input
+            compact
+            clearable
+            value={name}
+            placeholder="派户支名称"
+            onChange={(e) => setName(e.target.value)}
+          />
+        </FilterField>
+        <FilterField className="w-40">
+          <Select
+            compact
+            value={parentId}
+            onChange={(e) => setParentId(e.target.value)}
           >
-            查询
-          </Button>
-          <Button variant="secondary" onClick={resetFilters}>
-            重置
-          </Button>
-        </div>
-      </Card>
+            <option value="">上级派户支</option>
+            {parents.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        </FilterField>
+        <FilterField className="w-24">
+          <Input
+            compact
+            clearable
+            type="number"
+            value={level}
+            placeholder="世代"
+            onChange={(e) => setLevel(e.target.value)}
+          />
+        </FilterField>
+        <FilterField className="w-32">
+          <Select
+            compact
+            value={reviewStatus}
+            onChange={(e) => setReviewStatus(e.target.value)}
+          >
+            <option value="">审核状态</option>
+            <option value="已生效">已生效</option>
+            <option value="暂存">暂存</option>
+            <option value="待一审">待一审</option>
+            <option value="待二审">待二审</option>
+            <option value="待终审">待终审</option>
+            <option value="已驳回">已驳回</option>
+          </Select>
+        </FilterField>
+      </FilterBar>
 
       {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
 

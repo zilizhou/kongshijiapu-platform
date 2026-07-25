@@ -6,8 +6,9 @@ import { PaginationBar } from "@/components/PaginationBar";
 import {
   Button,
   Card,
+  FilterBar,
+  FilterField,
   Input,
-  Label,
   PageHeader,
   Select,
   TableScroll,
@@ -256,72 +257,73 @@ export default function DaikaoPage() {
         }
       />
 
-      <Card className="mb-4 p-4">
-        <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-          <div>
-            <Label>姓名</Label>
-            <Input
-              clearable
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="姓名"
-            />
-          </div>
-          <div>
-            <Label>谱号</Label>
-            <Input
-              clearable
-              value={no}
-              onChange={(e) => setNo(e.target.value)}
-              placeholder="如 002222"
-            />
-          </div>
-          <div>
-            <Label>代数</Label>
-            <Input
-              clearable
-              value={level}
-              onChange={(e) => setLevel(e.target.value)}
-              placeholder="如 70"
-            />
-          </div>
-          <div>
-            <Label>派户支/小节</Label>
-            <Input
-              clearable
-              value={group}
-              onChange={(e) => setGroup(e.target.value)}
-              placeholder="失敘 / 德州 / 亳州"
-            />
-          </div>
-          <div>
-            <Label>来源</Label>
-            <Select
-              value={sourceFile}
-              onChange={(e) => setSourceFile(e.target.value)}
-            >
-              <option value="">全部</option>
-              <option value="待攷支一">待攷支一</option>
-              <option value="待攷支二">待攷支二</option>
-            </Select>
-          </div>
-          <div>
-            <Label>卷册</Label>
-            <Input
-              clearable
-              value={volume}
-              onChange={(e) => setVolume(e.target.value)}
-              placeholder="四集卷一"
-            />
-          </div>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button onClick={search}>查询</Button>
-          <Button variant="secondary" onClick={reset}>
-            重置
-          </Button>
-        </div>
-      </Card>
+      <FilterBar
+        actions={
+          <>
+            <Button onClick={search}>查询</Button>
+            <Button variant="secondary" onClick={reset}>
+              重置
+            </Button>
+          </>
+        }
+      >
+        <FilterField className="w-28">
+          <Input
+            compact
+            clearable
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="姓名"
+          />
+        </FilterField>
+        <FilterField className="w-28">
+          <Input
+            compact
+            clearable
+            value={no}
+            onChange={(e) => setNo(e.target.value)}
+            placeholder="谱号"
+          />
+        </FilterField>
+        <FilterField className="w-24">
+          <Input
+            compact
+            clearable
+            value={level}
+            onChange={(e) => setLevel(e.target.value)}
+            placeholder="代数"
+          />
+        </FilterField>
+        <FilterField className="w-40">
+          <Input
+            compact
+            clearable
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
+            placeholder="派户支/章节"
+          />
+        </FilterField>
+        <FilterField className="w-28">
+          <Select
+            compact
+            value={sourceFile}
+            onChange={(e) => setSourceFile(e.target.value)}
+          >
+            <option value="">来源</option>
+            <option value="待攷支一">待攷支一</option>
+            <option value="待攷支二">待攷支二</option>
+          </Select>
+        </FilterField>
+        <FilterField className="w-28">
+          <Input
+            compact
+            clearable
+            value={volume}
+            onChange={(e) => setVolume(e.target.value)}
+            placeholder="卷册"
+          />
+        </FilterField>
+      </FilterBar>
 
       {error ? (
         <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">

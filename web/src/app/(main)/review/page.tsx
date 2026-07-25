@@ -11,8 +11,9 @@ import {
 import {
   Button,
   Card,
+  FilterBar,
+  FilterField,
   Input,
-  Label,
   PageHeader,
   StatusPill,
   TableScroll,
@@ -92,15 +93,8 @@ export default function ReviewListPage() {
         desc="家谱与派户支共用审流。一审改后可送二审，二审改后送终审，终审改后直接生效；修改字段会琥珀色高亮对照原值。"
       />
 
-      <Card className="mb-4 p-4">
-        <Label>关键词</Label>
-        <div className="mt-1 flex gap-2">
-          <Input
-            clearable
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="姓名 / 单号"
-          />
+      <FilterBar
+        actions={
           <Button
             onClick={() => {
               setPage(1);
@@ -109,8 +103,18 @@ export default function ReviewListPage() {
           >
             筛选
           </Button>
-        </div>
-      </Card>
+        }
+      >
+        <FilterField className="min-w-[14rem] flex-1">
+          <Input
+            compact
+            clearable
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="姓名 / 单号"
+          />
+        </FilterField>
+      </FilterBar>
 
       {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
 
