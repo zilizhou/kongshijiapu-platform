@@ -43,6 +43,29 @@ export type ImportRowResult = {
   ok: boolean;
   requestId?: number;
   error?: string;
+  /** 父亲重名，待人工选择 */
+  pendingParent?: boolean;
+};
+
+export type ParentCandidate = {
+  id: number;
+  name: string;
+  sex: string;
+  level: number | null;
+  groupName: string | null;
+  parentName: string | null;
+  address: string | null;
+  no: string | null;
+};
+
+export type PendingParentPick = {
+  row: number;
+  name: string;
+  parentName: string;
+  payload: PeoplePayload;
+  candidates: ParentCandidate[];
+  /** 库中精确同名总数（可能大于 candidates.length） */
+  candidateTotal: number;
 };
 
 function tipForColumn(c: (typeof IMPORT_COLUMNS)[number]): string {
