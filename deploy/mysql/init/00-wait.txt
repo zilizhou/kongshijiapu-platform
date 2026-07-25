@@ -1,0 +1,2 @@
+# MySQL will auto-run scripts in this folder only on first volume init.
+# Genealogy dump is imported separately via deploy/import-dump.sh after container is up.

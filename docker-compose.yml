@@ -1,0 +1,46 @@
+services:
+  db:
+    image: docker.m.daocloud.io/library/mysql:8.0.41
+    container_name: kong-jiapu-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-kongjp_root_2026}
+      MYSQL_DATABASE: kzjp01
+      MYSQL_USER: kongjp
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-kongjp_pass_2026}
+      TZ: Asia/Shanghai
+    ports:
+      - "3310:3306"
+    volumes:
+      - kong_jiapu_mysql:/var/lib/mysql
+      - ./deploy/mysql/conf.d:/etc/mysql/conf.d:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_allowed_packet=1G
+      - --innodb_buffer_pool_size=2G
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pkongjp_root_2026"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: kong-jiapu-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql://kongjp:${MYSQL_PASSWORD:-kongjp_pass_2026}@db:3306/kzjp01
+      AUTH_SECRET: ${AUTH_SECRET:-kong-jiapu-auth-secret-change-me}
+      APP_PORT: 8090
+      TZ: Asia/Shanghai
+    ports:
+      - "8090:8090"
+
+volumes:
+  kong_jiapu_mysql:

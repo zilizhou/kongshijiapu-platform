@@ -1,0 +1,306 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f3f6fa;
+  --panel: #ffffff;
+  --ink: #243044;
+  --muted: #6b7a90;
+  --line: #e2e8f0;
+  --sidebar: #3d4f66;
+  --sidebar-2: #334456;
+  --accent: #c94b4b;
+  --accent-hover: #b03d3d;
+  --accent-soft: #fdecea;
+  --ok: #3d8f6a;
+  --warn: #c9943a;
+  --danger: #c94b4b;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(106, 164, 224, 0.12), transparent 55%),
+    radial-gradient(900px 420px at 90% 0%, rgba(201, 75, 75, 0.08), transparent 50%),
+    var(--bg);
+  font-family: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", sans-serif;
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: "Noto Serif SC", "Songti SC", "STSong", serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #c5d0de;
+  border-radius: 999px;
+}
+
+/* —— 家谱出版：竖版纸 + 传统竖排 ——
+ * 纸张：A4 竖版（高>宽）。
+ * 每人：大字姓名在上，小传在下（至多两列小字，先右后左）。
+ * 多人：同一列内上下接排；列满后向左开新列；页宽用尽换页。
+ *       （不是一人独占整列高度。）
+ */
+.publish-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.publish-page {
+  --pub-paper: #f7f0e2;
+  --pub-rule: #c45c4a;
+  --pub-ink: #2a1f18;
+  /* A4 竖版 210×297：高度受限时宽度随比例收缩 */
+  --pub-page-h: min(905px, calc(100vh - 150px));
+  height: var(--pub-page-h);
+  width: min(640px, 100%, calc(var(--pub-page-h) * 210 / 297));
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  background: var(--pub-paper);
+  color: var(--pub-ink);
+  border: 1px solid #e2d4bf;
+  box-shadow: 0 8px 28px rgba(42, 31, 24, 0.08);
+  overflow: hidden;
+}
+
+.publish-spine {
+  writing-mode: vertical-rl;
+  flex: 0 0 2.75rem;
+  padding: 1rem 0.25rem;
+  border-right: 3px double var(--pub-rule);
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  background: linear-gradient(90deg, #f0e6d4, var(--pub-paper));
+}
+
+.publish-spine-level {
+  margin-block-start: 1.25rem;
+  font-size: 0.9em;
+  opacity: 0.85;
+}
+
+.publish-frame {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.75rem 0.85rem 0.9rem;
+  overflow: hidden;
+}
+
+/* 隐藏测量层：必须给明确纸宽（不能写 100%，绝对定位父级百分比会塌成内容宽≈1 列） */
+.publish-measure {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.publish-measure .publish-page {
+  width: min(640px, calc(var(--pub-page-h) * 210 / 297));
+}
+
+.publish-page-probe {
+  box-shadow: none !important;
+}
+
+/* 版心竖排：宋体/明体（对齐印刷族谱样张） */
+.publish-body {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  height: 100%;
+  width: max-content;
+  font-family: "Songti SC", "STSong", "SimSun", "宋体", var(--font-serif),
+    serif;
+  font-weight: 400;
+}
+
+.publish-body-measure {
+  width: max-content;
+}
+
+.publish-body-paged {
+  width: 100%;
+  min-width: 0;
+}
+
+/*
+ * 每人一块。样张比例：姓名约小字 2 倍（非整栏加粗大字）；
+ * 小传两列更易读；姓名常规字重居中。
+ */
+.publish-person {
+  --pub-detail: 1.14rem;
+  --pub-line: 1.15;
+  writing-mode: horizontal-tb;
+  display: inline-block;
+  vertical-align: top;
+  width: calc(2 * var(--pub-detail) * var(--pub-line));
+  height: auto;
+  max-height: 100%;
+  margin-block-end: 0.28em;
+  padding: 0 0.18em 0.15em;
+  border-right: 1px solid rgba(196, 92, 74, 0.4);
+  box-sizing: content-box;
+  overflow: hidden;
+  break-inside: avoid;
+  text-align: center;
+}
+
+.publish-name {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  transform: translateX(0.08em);
+  /* 约 1.55× 小字，缩小与小传的字号差 */
+  font-size: calc(1.55 * var(--pub-detail));
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: 0.08em;
+}
+
+.publish-details {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  display: block;
+  margin-inline: auto;
+  width: 100%;
+  font-size: var(--pub-detail);
+  font-weight: 400;
+  line-height: var(--pub-line);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-align: start;
+}
+
+.publish-entry-focus .publish-name {
+  color: inherit;
+}
+
+.publish-circled-nv {
+  writing-mode: horizontal-tb;
+  display: inline-block;
+  width: 1.05em;
+  height: 1.05em;
+  margin-bottom: 0.12em;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.65em;
+  font-weight: 600;
+  line-height: 1.05em;
+  text-align: center;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    height: auto !important;
+    overflow: hidden !important;
+  }
+
+  /* 默认全部隐藏，只露出世系表纸面（红框内容） */
+  body * {
+    visibility: hidden !important;
+  }
+
+  .publish-pages,
+  .publish-pages * {
+    visibility: visible !important;
+  }
+
+  .no-print,
+  .no-print * {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  .app-shell-aside,
+  .app-shell-header,
+  .publish-query-panel,
+  .publish-page-header {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+  }
+
+  .publish-result-card {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+  }
+
+  .publish-pages {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 210mm;
+    gap: 0 !important;
+    align-items: stretch !important;
+  }
+
+  .publish-page {
+    visibility: visible !important;
+    box-sizing: border-box !important;
+    box-shadow: none !important;
+    border: 1px solid #c45c4a;
+    width: 210mm !important;
+    height: 297mm !important;
+    max-height: 297mm !important;
+    margin: 0 !important;
+    break-inside: avoid;
+    page-break-after: always;
+    page-break-inside: avoid;
+    overflow: hidden !important;
+  }
+
+  .publish-page:last-child {
+    page-break-after: auto !important;
+  }
+
+  .publish-frame {
+    overflow: hidden !important;
+    height: 100% !important;
+  }
+
+  .publish-body {
+    height: 100% !important;
+  }
+}
