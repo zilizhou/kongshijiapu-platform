@@ -5,7 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
 } from "react";
 import type { PublishEntry, PublishPayload } from "@/lib/publish";
 
@@ -17,18 +16,16 @@ function flattenEntries(data: PublishPayload): FlatEntry[] {
   );
 }
 
-/** 小传折成至多两列所需高度（字数/2 上行） */
-function bioHeightStyle(bio: string): CSSProperties | undefined {
-  const n = bio.replace(/\s+/g, "").length;
-  if (n <= 0) return undefined;
-  const lines = Math.max(1, Math.ceil(n / 2));
-  return {
-    height: `calc(${lines} * var(--pub-detail) * var(--pub-line))`,
-  };
+/** 小传固定拆成两列：右列先读（前半），左列后读（后半） */
+function splitBioColumns(bio: string): { right: string; left: string } {
+  const text = bio.replace(/\s+/g, "");
+  const mid = Math.ceil(text.length / 2);
+  return { right: text.slice(0, mid), left: text.slice(mid) };
 }
 
 function PersonStrip({ entry }: { entry: FlatEntry | PublishEntry }) {
   const female = entry.sex === "女";
+  const cols = entry.bio ? splitBioColumns(entry.bio) : null;
   return (
     <div
       className={`publish-person ${entry.isFocus ? "publish-entry-focus" : ""}`}
@@ -36,9 +33,10 @@ function PersonStrip({ entry }: { entry: FlatEntry | PublishEntry }) {
     >
       {female ? <span className="publish-circled-nv">女</span> : null}
       <div className="publish-name">{entry.name}</div>
-      {entry.bio ? (
-        <div className="publish-details" style={bioHeightStyle(entry.bio)}>
-          {entry.bio}
+      {cols ? (
+        <div className="publish-details">
+          <div className="publish-details-col">{cols.right}</div>
+          <div className="publish-details-col">{cols.left}</div>
         </div>
       ) : null}
     </div>

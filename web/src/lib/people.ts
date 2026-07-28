@@ -1,4 +1,5 @@
 import { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { resolvePeopleGroupPatterns } from "./branch";
 import { execute, query } from "./db";
 import {
   composeLegacyAlias,
@@ -176,7 +177,7 @@ export async function searchPeople(opts: {
     where.push(
       likeOrClause(
         ["p.F_GROUP"],
-        searchTextVariants(opts.group),
+        await resolvePeopleGroupPatterns(opts.group),
         "groupName",
         params,
       ),
@@ -1241,6 +1242,13 @@ let statsMem: {
   data: {
     peopleTotal: number;
     branchTotal: number;
+    daikaoTotal: number;
+    daikaoFile1: number;
+    daikaoFile2: number;
+    daikaoMale: number;
+    daikaoFemale: number;
+    daikaoRoots: number;
+    daikaoErrors: number;
     draft: number;
     pending_1: number;
     pending_2: number;
@@ -1256,6 +1264,14 @@ export async function getDashboardStats() {
   }
   let peopleTotal = 0;
   let branchTotal = 0;
+  let daikaoTotal = 0;
+  let daikaoFile1 = 0;
+  let daikaoFile2 = 0;
+  let daikaoMale = 0;
+  let daikaoFemale = 0;
+  let daikaoRoots = 0;
+  let daikaoErrors = 0;
+
   if (await tableExists("tb_people")) {
     const peopleRows = await query<RowDataPacket[]>(
       `SELECT COUNT(*) AS c FROM tb_people`,
@@ -1268,6 +1284,32 @@ export async function getDashboardStats() {
     );
     branchTotal = Number(branchRows[0]?.c || 0);
   }
+  if (await tableExists("tb_daikao_people")) {
+    const rows = await query<RowDataPacket[]>(
+      `SELECT
+         COUNT(*) AS total,
+         SUM(source_file = '待攷支一') AS file1,
+         SUM(source_file = '待攷支二') AS file2,
+         SUM(sex = '男') AS male_cnt,
+         SUM(sex = '女') AS female_cnt,
+         SUM(is_root = 1) AS roots
+       FROM tb_daikao_people`,
+    );
+    const r = rows[0];
+    daikaoTotal = Number(r?.total || 0);
+    daikaoFile1 = Number(r?.file1 || 0);
+    daikaoFile2 = Number(r?.file2 || 0);
+    daikaoMale = Number(r?.male_cnt || 0);
+    daikaoFemale = Number(r?.female_cnt || 0);
+    daikaoRoots = Number(r?.roots || 0);
+  }
+  if (await tableExists("tb_daikao_parse_error")) {
+    const errRows = await query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS c FROM tb_daikao_parse_error`,
+    );
+    daikaoErrors = Number(errRows[0]?.c || 0);
+  }
+
   const statusRows = await query<RowDataPacket[]>(
     `SELECT status, COUNT(*) AS c FROM app_change_requests GROUP BY status`,
   );
@@ -1276,6 +1318,13 @@ export async function getDashboardStats() {
   const data = {
     peopleTotal,
     branchTotal,
+    daikaoTotal,
+    daikaoFile1,
+    daikaoFile2,
+    daikaoMale,
+    daikaoFemale,
+    daikaoRoots,
+    daikaoErrors,
     draft: byStatus.draft || 0,
     pending_1: byStatus.pending_1 || 0,
     pending_2: byStatus.pending_2 || 0,

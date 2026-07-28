@@ -128,6 +128,93 @@ async function tableExists(name: string) {
   return rows.length > 0;
 }
 
+/**
+ * 派户支选择器给的是 tb_branch.F_FULL_NAME（如「道溝戶費縣支」），
+ * 人员表 F_GROUP 却是逗号分段（如「道溝戶,費縣支,零」）。
+ * 本函数把查询词扩展成能匹配 F_GROUP 的模式列表。
+ */
+export async function resolvePeopleGroupPatterns(
+  input: string,
+): Promise<string[]> {
+  const raw = (input || "").trim();
+  if (!raw) return [];
+
+  const set = new Set<string>(searchTextVariants(raw));
+
+  // 已有逗号：直接可用
+  if (/[,，]/.test(raw)) {
+    for (const v of [...set]) {
+      set.add(v.replace(/，/g, ","));
+    }
+    return [...set];
+  }
+
+  if (!(await tableExists("tb_branch"))) {
+    return [...set];
+  }
+
+  for (const v of searchTextVariants(raw)) {
+    const hits = await query<
+      (RowDataPacket & {
+        F_ID: number;
+        F_NAME: string;
+        F_FULL_NAME: string;
+        F_PARENT_ID: number | null;
+      })[]
+    >(
+      `SELECT F_ID, F_NAME, F_FULL_NAME, F_PARENT_ID
+       FROM tb_branch
+       WHERE F_FULL_NAME = :v OR F_NAME = :v
+       ORDER BY (F_FULL_NAME = :v) DESC, F_ID ASC
+       LIMIT 8`,
+      { v },
+    );
+
+    for (const hit of hits) {
+      const parts: string[] = [];
+      let curId: number | null = Number(hit.F_ID);
+      const seen = new Set<number>();
+      for (let depth = 0; depth < 20 && curId && !seen.has(curId); depth++) {
+        seen.add(curId);
+        type BranchLite = RowDataPacket & {
+          F_ID: number;
+          F_NAME: string;
+          F_PARENT_ID: number | null;
+        };
+        const rows: BranchLite[] = await query<BranchLite[]>(
+          `SELECT F_ID, F_NAME, F_PARENT_ID FROM tb_branch WHERE F_ID = :id LIMIT 1`,
+          { id: curId },
+        );
+        const row: BranchLite | undefined = rows[0];
+        if (!row) break;
+        const parentId: number | null = row.F_PARENT_ID
+          ? Number(row.F_PARENT_ID)
+          : null;
+        const nm = (row.F_NAME || "").trim();
+        // 跳过始祖/中兴等总纲节点
+        if (nm && curId > 2 && !/始祖|中興|中兴/.test(nm)) {
+          parts.push(nm);
+        }
+        if (!parentId || parentId <= 2) break;
+        curId = parentId;
+      }
+      parts.reverse();
+      if (parts.length) {
+        const joined = parts.join(",");
+        set.add(joined);
+        // 也匹配末尾带「,零」的常见写法
+        set.add(`${joined},零`);
+      }
+    }
+
+    // 兜底：在「戶/派」与后续「支」之间插逗号
+    const heur = v.replace(/([戶户派])(?=[^零,，])/g, "$1,");
+    if (heur !== v) set.add(heur);
+  }
+
+  return [...set];
+}
+
 export async function searchBranches(opts: {
   name?: string;
   parentId?: number;

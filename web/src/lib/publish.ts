@@ -1,4 +1,5 @@
 import { RowDataPacket } from "mysql2/promise";
+import { resolvePeopleGroupPatterns } from "./branch";
 import { query } from "./db";
 import {
   getAncestors,
@@ -6,7 +7,7 @@ import {
   getPeopleById,
 } from "./people";
 import { PeopleRow } from "./types";
-import { likeOrClause, searchTextVariants } from "./zh";
+import { likeOrClause } from "./zh";
 
 export type PublishEntry = {
   id: number;
@@ -258,6 +259,39 @@ async function collectDescendants(
   return out;
 }
 
+/** 按父 ID 批量取子嗣（不依赖本刊是否收录该子），保证「子N+名」完整 */
+async function loadChildMap(
+  parentIds: number[],
+): Promise<Map<number, ChildRef[]>> {
+  const map = new Map<number, ChildRef[]>();
+  const unique = [...new Set(parentIds.filter((id) => id > 0))];
+  if (!unique.length) return map;
+  if (!(await tableExists("tb_people_relation"))) return map;
+
+  for (let i = 0; i < unique.length; i += 80) {
+    const chunk = unique.slice(i, i + 80);
+    const ph = chunk.map(() => "?").join(",");
+    const rows = await query<RowDataPacket[]>(
+      `SELECT r.F_PARENT_ID, p.F_NAME, p.F_SEX
+       FROM tb_people_relation r
+       JOIN tb_people p ON p.F_ID = r.F_PEOPLE_ID
+       WHERE r.F_PARENT_ID IN (${ph})
+       ORDER BY p.F_LEFT ASC, p.F_ID ASC`,
+      chunk,
+    );
+    for (const r of rows) {
+      const pid = Number(r.F_PARENT_ID);
+      const list = map.get(pid) || [];
+      list.push({
+        name: String(r.F_NAME || ""),
+        sex: String(r.F_SEX || "男"),
+      });
+      map.set(pid, list);
+    }
+  }
+  return map;
+}
+
 async function hydratePeople(ids: number[]): Promise<Map<number, PeopleRow>> {
   const map = new Map<number, PeopleRow>();
   if (!ids.length) return map;
@@ -366,14 +400,7 @@ export async function buildPublishByPerson(
     if (orderMap.has(p.id)) p.siblingOrder = orderMap.get(p.id) ?? null;
   }
 
-  const childMap = new Map<number, ChildRef[]>();
-  for (const p of people) {
-    if (p.parentId) {
-      const list = childMap.get(p.parentId) || [];
-      list.push({ name: p.name, sex: p.sex });
-      childMap.set(p.parentId, list);
-    }
-  }
+  const childMap = await loadChildMap(people.map((p) => p.id));
 
   const generations = groupByLevel(people, childMap, focus.id);
   return {
@@ -391,7 +418,7 @@ export async function buildPublishByBranch(
   limit: number | "all" = 100,
 ): Promise<PublishPayload> {
   const g = group.trim();
-  const variants = searchTextVariants(g);
+  const variants = await resolvePeopleGroupPatterns(g);
   if (!variants.length) {
     return {
       mode: "branch",
@@ -436,14 +463,7 @@ export async function buildPublishByBranch(
     .map((id) => hydrated.get(id))
     .filter((p): p is PeopleRow => Boolean(p));
 
-  const childMap = new Map<number, ChildRef[]>();
-  for (const p of people) {
-    if (p.parentId) {
-      const list = childMap.get(p.parentId) || [];
-      list.push({ name: p.name, sex: p.sex });
-      childMap.set(p.parentId, list);
-    }
-  }
+  const childMap = await loadChildMap(people.map((p) => p.id));
 
   const truncated = matchedTotal > people.length;
   const limitLabel =

@@ -154,15 +154,15 @@ h3,
   writing-mode: horizontal-tb;
   display: inline-block;
   vertical-align: top;
+  /* 固定两列小传宽，不给第三列留空 */
   width: calc(2 * var(--pub-detail) * var(--pub-line));
   height: auto;
-  max-height: 100%;
   /* 同列上下两人之间留白（与 PublishSheet gapPx 配套） */
   margin-block-end: 0.9em;
   padding: 0 0.18em 0.35em;
   border-right: 1px solid rgba(196, 92, 74, 0.4);
   box-sizing: content-box;
-  overflow: hidden;
+  overflow: visible;
   break-inside: avoid;
   text-align: center;
 }
@@ -183,18 +183,29 @@ h3,
   letter-spacing: 0.08em;
 }
 
+/* 小传：横向排两列竖排文字，右列先读 */
 .publish-details {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  display: block;
-  margin-inline: auto;
+  writing-mode: horizontal-tb;
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 0;
   width: 100%;
+  margin-inline: auto;
   font-size: var(--pub-detail);
   font-weight: 400;
+}
+
+.publish-details-col {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  flex: 0 0 auto;
+  width: calc(var(--pub-detail) * var(--pub-line));
   line-height: var(--pub-line);
   letter-spacing: 0.02em;
-  overflow: hidden;
   text-align: start;
+  overflow: visible;
 }
 
 .publish-entry-focus .publish-name {

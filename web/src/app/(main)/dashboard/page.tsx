@@ -15,6 +15,13 @@ import type { SessionUser } from "@/lib/types";
 type Stats = {
   peopleTotal: number;
   branchTotal: number;
+  daikaoTotal: number;
+  daikaoFile1: number;
+  daikaoFile2: number;
+  daikaoMale: number;
+  daikaoFemale: number;
+  daikaoRoots: number;
+  daikaoErrors: number;
   draft: number;
   pending_1: number;
   pending_2: number;
@@ -175,6 +182,9 @@ export default function DashboardPage() {
             <Link href="/people">
               <Button variant="secondary">家谱管理</Button>
             </Link>
+            <Link href="/daikao">
+              <Button variant="secondary">待考管理</Button>
+            </Link>
             {canEdit ? (
               <Link href="/edit">
                 <Button>我的编修</Button>
@@ -193,7 +203,7 @@ export default function DashboardPage() {
         <Card className="p-4 text-accent">{error}</Card>
       ) : (
         <>
-          <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <StatBlock
               title="人员"
               accent="border-t-sidebar"
@@ -213,6 +223,24 @@ export default function DashboardPage() {
                 { label: "待一审", value: stats?.pending_1 || 0 },
                 { label: "待二审", value: stats?.pending_2 || 0 },
                 { label: "待终审", value: stats?.pending_final || 0 },
+              ]}
+            />
+            <StatBlock
+              title="待考人员"
+              accent="border-t-accent"
+              total={stats?.daikaoTotal || 0}
+              rows={[
+                { label: "待攷支一", value: stats?.daikaoFile1 || 0 },
+                { label: "待攷支二", value: stats?.daikaoFile2 || 0 },
+                { label: "男性", value: stats?.daikaoMale || 0 },
+                { label: "女性", value: stats?.daikaoFemale || 0 },
+                { label: "支根", value: stats?.daikaoRoots || 0 },
+                {
+                  label: "解析失败",
+                  value: stats?.daikaoErrors || 0,
+                  tone:
+                    (stats?.daikaoErrors || 0) > 0 ? "text-danger" : undefined,
+                },
               ]}
             />
             <StatBlock
