@@ -9,6 +9,10 @@ export async function GET(req: NextRequest) {
     const data = await searchPeople({
       q: sp.get("q") || undefined,
       name: sp.get("name") || undefined,
+      fatherName: sp.get("fatherName") || undefined,
+      grandfatherName: sp.get("grandfatherName") || undefined,
+      pinyin: sp.get("pinyin") || undefined,
+      ziHao: sp.get("ziHao") || undefined,
       no: sp.get("no") || undefined,
       level: sp.get("level") ? Number(sp.get("level")) : undefined,
       group: sp.get("group") || undefined,

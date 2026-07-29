@@ -67,6 +67,11 @@ function ActionBtn({
 
 type PeopleFilters = {
   name: string;
+  fatherName: string;
+  grandfatherName: string;
+  pinyin: string;
+  ziHao: string;
+  q: string;
   no: string;
   level: string;
   group: string;
@@ -76,6 +81,11 @@ type PeopleFilters = {
 
 const emptyFilters: PeopleFilters = {
   name: "",
+  fatherName: "",
+  grandfatherName: "",
+  pinyin: "",
+  ziHao: "",
+  q: "",
   no: "",
   level: "",
   group: "",
@@ -87,6 +97,11 @@ export default function PeoplePage() {
   const [user, setUser] = useState<SessionUser | null>(null);
   // 输入框草稿：点「查询」后才生效，避免边输边请求、慢请求回写错乱
   const [name, setName] = useState("");
+  const [fatherName, setFatherName] = useState("");
+  const [grandfatherName, setGrandfatherName] = useState("");
+  const [pinyin, setPinyin] = useState("");
+  const [ziHao, setZiHao] = useState("");
+  const [q, setQ] = useState("");
   const [no, setNo] = useState("");
   const [level, setLevel] = useState("");
   const [group, setGroup] = useState("");
@@ -127,6 +142,12 @@ export default function PeoplePage() {
       pageSize: String(pageSize),
     });
     if (filters.name) sp.set("name", filters.name);
+    if (filters.fatherName) sp.set("fatherName", filters.fatherName);
+    if (filters.grandfatherName)
+      sp.set("grandfatherName", filters.grandfatherName);
+    if (filters.pinyin) sp.set("pinyin", filters.pinyin);
+    if (filters.ziHao) sp.set("ziHao", filters.ziHao);
+    if (filters.q) sp.set("q", filters.q);
     if (filters.no) sp.set("no", filters.no);
     if (filters.level) sp.set("level", filters.level);
     if (filters.group) sp.set("group", filters.group);
@@ -156,6 +177,11 @@ export default function PeoplePage() {
 
   function applySearch(next: PeopleFilters = {
     name,
+    fatherName,
+    grandfatherName,
+    pinyin,
+    ziHao,
+    q,
     no,
     level,
     group,
@@ -168,6 +194,11 @@ export default function PeoplePage() {
 
   function reset() {
     setName("");
+    setFatherName("");
+    setGrandfatherName("");
+    setPinyin("");
+    setZiHao("");
+    setQ("");
     setNo("");
     setLevel("");
     setGroup("");
@@ -316,6 +347,30 @@ export default function PeoplePage() {
             placeholder="姓名"
           />
         </FilterField>
+        <FilterField className="w-28">
+          <Input
+            compact
+            clearable
+            value={fatherName}
+            onChange={(e) => setFatherName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applySearch();
+            }}
+            placeholder="父亲姓名"
+          />
+        </FilterField>
+        <FilterField className="w-28">
+          <Input
+            compact
+            clearable
+            value={grandfatherName}
+            onChange={(e) => setGrandfatherName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applySearch();
+            }}
+            placeholder="爷爷姓名"
+          />
+        </FilterField>
         <FilterField className="w-24">
           <Select
             compact
@@ -371,15 +426,56 @@ export default function PeoplePage() {
           </Select>
         </FilterField>
         {moreFilters ? (
-          <FilterField className="w-32">
-            <Input
-              compact
-              clearable
-              value={no}
-              onChange={(e) => setNo(e.target.value)}
-              placeholder="谱号"
-            />
-          </FilterField>
+          <>
+            <FilterField className="w-32">
+              <Input
+                compact
+                clearable
+                value={pinyin}
+                onChange={(e) => setPinyin(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applySearch();
+                }}
+                placeholder="拼音"
+              />
+            </FilterField>
+            <FilterField className="w-28">
+              <Input
+                compact
+                clearable
+                value={ziHao}
+                onChange={(e) => setZiHao(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applySearch();
+                }}
+                placeholder="字号"
+              />
+            </FilterField>
+            <FilterField className="w-36">
+              <Input
+                compact
+                clearable
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applySearch();
+                }}
+                placeholder="关键字"
+              />
+            </FilterField>
+            <FilterField className="w-32">
+              <Input
+                compact
+                clearable
+                value={no}
+                onChange={(e) => setNo(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applySearch();
+                }}
+                placeholder="谱号"
+              />
+            </FilterField>
+          </>
         ) : null}
       </FilterBar>
 
@@ -428,6 +524,7 @@ export default function PeoplePage() {
               <tr>
                 <th className="px-3 py-3 font-medium">序号</th>
                 <th className="px-3 py-3 font-medium">姓名</th>
+                <th className="px-3 py-3 font-medium">父亲</th>
                 <th className="px-3 py-3 font-medium">性别</th>
                 <th className="px-3 py-3 font-medium">代数</th>
                 <th className="px-3 py-3 font-medium">所属派户支</th>
@@ -442,13 +539,13 @@ export default function PeoplePage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-3 py-10 text-center text-muted" colSpan={11}>
+                  <td className="px-3 py-10 text-center text-muted" colSpan={12}>
                     加载中...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-10 text-center text-muted" colSpan={11}>
+                  <td className="px-3 py-10 text-center text-muted" colSpan={12}>
                     无结果
                   </td>
                 </tr>
@@ -469,6 +566,7 @@ export default function PeoplePage() {
                         {(page - 1) * pageSize + idx + 1}
                       </td>
                       <td className="px-3 py-3 font-medium">{p.name}</td>
+                      <td className="px-3 py-3">{dash(p.parentName)}</td>
                       <td className="px-3 py-3">{p.sex}</td>
                       <td className="px-3 py-3">{p.level ?? "-"}</td>
                       <td
@@ -524,6 +622,7 @@ export default function PeoplePage() {
                         <td className="px-3 py-2 pl-8 font-medium text-[#4a3728]">
                           {c.name}
                         </td>
+                        <td className="px-3 py-2">{dash(c.parentName)}</td>
                         <td className="px-3 py-2">{c.sex}</td>
                         <td className="px-3 py-2">{c.level ?? "-"}</td>
                         <td className="px-3 py-2">{formatGroup(c.groupName)}</td>

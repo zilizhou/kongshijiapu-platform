@@ -136,9 +136,32 @@ async function attachLatestReviewStatus(
   }
 }
 
+function pinyinLikeClause(
+  column: string,
+  input: string,
+  paramPrefix: string,
+  params: Record<string, unknown>,
+): string {
+  const raw = input.trim().toLowerCase();
+  const compact = raw.replace(/\s+/g, "");
+  const key = `${paramPrefix}`;
+  const keyCompact = `${paramPrefix}Compact`;
+  params[key] = `%${raw}%`;
+  params[keyCompact] = `%${compact}%`;
+  return `(LOWER(IFNULL(${column}, '')) LIKE :${key} OR REPLACE(LOWER(IFNULL(${column}, '')), ' ', '') LIKE :${keyCompact})`;
+}
+
 export async function searchPeople(opts: {
   q?: string;
   name?: string;
+  /** 父亲姓名（谱上父 / 当前父） */
+  fatherName?: string;
+  /** 爷爷姓名（父之父） */
+  grandfatherName?: string;
+  /** 拼音（支持带空格或不带空格） */
+  pinyin?: string;
+  /** 字或号 */
+  ziHao?: string;
   no?: string;
   level?: number;
   group?: string;
@@ -156,6 +179,12 @@ export async function searchPeople(opts: {
   const where: string[] = ["1=1"];
   const params: Record<string, unknown> = {};
 
+  const fatherName = opts.fatherName?.trim() || "";
+  const grandfatherName = opts.grandfatherName?.trim() || "";
+  const pinyin = opts.pinyin?.trim() || "";
+  const ziHao = opts.ziHao?.trim() || "";
+  const keyword = opts.q?.trim() || "";
+
   if (opts.parentId) {
     where.push("r.F_PARENT_ID = :parentId");
     params.parentId = opts.parentId;
@@ -163,6 +192,40 @@ export async function searchPeople(opts: {
   if (opts.name) {
     where.push(
       likeOrClause(["p.F_NAME"], searchTextVariants(opts.name), "name", params),
+    );
+  }
+  if (fatherName) {
+    // 同时匹配关系表冗余父名与父亲现名，避免改名后查不到
+    where.push(
+      likeOrClause(
+        ["r.F_PARENT_NAME", "parent_p.F_NAME"],
+        searchTextVariants(fatherName),
+        "fatherName",
+        params,
+      ),
+    );
+  }
+  if (grandfatherName) {
+    where.push(
+      likeOrClause(
+        ["gp.F_PARENT_NAME", "grandpa_p.F_NAME"],
+        searchTextVariants(grandfatherName),
+        "grandfatherName",
+        params,
+      ),
+    );
+  }
+  if (pinyin) {
+    where.push(pinyinLikeClause("p.F_PINYIN", pinyin, "pinyin", params));
+  }
+  if (ziHao) {
+    where.push(
+      likeOrClause(
+        ["courtesy.zi", "courtesy.hao", "p.F_ALIAS"],
+        searchTextVariants(ziHao),
+        "ziHao",
+        params,
+      ),
     );
   }
   if (opts.no) {
@@ -197,39 +260,93 @@ export async function searchPeople(opts: {
       ),
     );
   }
-  if (opts.q) {
-    const variants = searchTextVariants(opts.q);
+  if (keyword) {
+    const variants = searchTextVariants(keyword);
     const parts: string[] = [];
     variants.forEach((v, i) => {
       const key = `q${i}`;
       params[key] = `%${v}%`;
       parts.push(
-        `(p.F_NAME LIKE :${key} OR p.F_NO LIKE :${key} OR p.F_GROUP LIKE :${key})`,
+        `(p.F_NAME LIKE :${key} OR p.F_NO LIKE :${key} OR p.F_GROUP LIKE :${key} OR p.F_ALIAS LIKE :${key} OR p.F_ADDRESS LIKE :${key} OR courtesy.zi LIKE :${key} OR courtesy.hao LIKE :${key})`,
       );
     });
     // 号码类关键词也按原文匹配
-    params.qRaw = `%${opts.q.trim()}%`;
+    params.qRaw = `%${keyword}%`;
     parts.push(`p.F_NO LIKE :qRaw`);
+    parts.push(pinyinLikeClause("p.F_PINYIN", keyword, "qPinyin", params));
     where.push(`(${parts.join(" OR ")})`);
   }
 
   const whereSql = where.join(" AND ");
   const hasRelation = await tableExists("tb_people_relation");
 
-  if (opts.parentId && !hasRelation) {
+  if ((opts.parentId || fatherName || grandfatherName) && !hasRelation) {
     return { total: 0, page, pageSize, items: [] };
+  }
+
+  let needCourtesy = false;
+  if (ziHao || keyword) {
+    await ensureCourtesyTable();
+    needCourtesy =
+      courtesyTableReady || (await tableExists("app_people_courtesy"));
   }
 
   // 列表不 JOIN info：导入期 tb_people_info 写入很重，联表会拖到数秒～超时。
   // 详情抽屉走 getPeopleById。
-  // COUNT 勿 JOIN relation：170 万行 LEFT JOIN 计数可达数秒；仅 parentId 筛选时才需要。
-  const needRelationJoin = hasRelation && Boolean(opts.parentId);
-  const joinRelationForCount = needRelationJoin
-    ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
-    : "";
+  // COUNT 勿无谓 JOIN relation：170 万行 LEFT JOIN 计数可达数秒；仅筛父系时才需要。
+  const needRelationJoin =
+    hasRelation &&
+    Boolean(opts.parentId || fatherName || grandfatherName);
+  const needParentPeopleJoin = hasRelation && Boolean(fatherName);
+  const needGrandparentJoin = hasRelation && Boolean(grandfatherName);
+
+  const relationJoins = [
+    needRelationJoin || needParentPeopleJoin || needGrandparentJoin
+      ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
+      : "",
+    needParentPeopleJoin || needGrandparentJoin
+      ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = r.F_PARENT_ID"
+      : "",
+    needGrandparentJoin
+      ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = r.F_PARENT_ID"
+      : "",
+    needGrandparentJoin
+      ? "LEFT JOIN tb_people grandpa_p ON grandpa_p.F_ID = gp.F_PARENT_ID"
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n     ");
+
+  // SELECT 路径始终带 relation（有表时），以便列表展示父名
   const joinRelationForSelect = hasRelation
     ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
     : "";
+  const parentGrandJoinsForSelect = [
+    needParentPeopleJoin || needGrandparentJoin
+      ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = r.F_PARENT_ID"
+      : "",
+    needGrandparentJoin
+      ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = r.F_PARENT_ID"
+      : "",
+    needGrandparentJoin
+      ? "LEFT JOIN tb_people grandpa_p ON grandpa_p.F_ID = gp.F_PARENT_ID"
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n     ");
+
+  const courtesyJoin = needCourtesy
+    ? "LEFT JOIN app_people_courtesy courtesy ON courtesy.people_id = p.F_ID"
+    : "";
+
+  // 关键字/字号条件引用了 courtesy.*；若表未就绪则改写条件避免 SQL 报错
+  let finalWhereSql = whereSql;
+  if (!needCourtesy && (ziHao || keyword)) {
+    finalWhereSql = finalWhereSql
+      .replace(/courtesy\.zi/g, "NULL")
+      .replace(/courtesy\.hao/g, "NULL");
+  }
+
   const selectParent = hasRelation
     ? "r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID"
     : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID";
@@ -259,9 +376,10 @@ export async function searchPeople(opts: {
   const countRows = await query<RowDataPacket[]>(
     `SELECT COUNT(*) AS c
      FROM tb_people p
-     ${joinRelationForCount}
+     ${relationJoins}
+     ${courtesyJoin}
      ${auditJoin}
-     WHERE ${whereSql}`,
+     WHERE ${finalWhereSql}`,
     params,
   );
   const total = Number(countRows[0]?.c || 0);
@@ -277,8 +395,10 @@ export async function searchPeople(opts: {
             ${selectChildCount}
      FROM tb_people p
      ${joinRelationForSelect}
+     ${parentGrandJoinsForSelect}
+     ${courtesyJoin}
      ${auditJoin}
-     WHERE ${whereSql}
+     WHERE ${finalWhereSql}
      ORDER BY p.F_ID ASC
      LIMIT ${pageSize} OFFSET ${offset}`,
     params,
