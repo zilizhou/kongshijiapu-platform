@@ -7,7 +7,7 @@ function parseLimit(raw: string | null): number | "all" {
   if (v === "all" || v === "全部") return "all";
   const n = Number(v);
   if (!Number.isFinite(n)) return 100;
-  return Math.max(1, Math.min(20000, Math.floor(n)));
+  return Math.max(1, Math.floor(n));
 }
 
 export async function GET(req: NextRequest) {

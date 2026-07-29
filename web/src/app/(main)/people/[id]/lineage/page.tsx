@@ -10,6 +10,7 @@ import {
   LineageContextMenu,
 } from "@/components/LineageAddDialog";
 import { PersonNodeDrawer } from "@/components/PersonNodeDrawer";
+import { PeopleListBackLink } from "@/components/PeopleListBackLink";
 import { Button, Card, PageHeader, TableScroll } from "@/components/ui";
 import type { LineageNode, PeopleRow, SessionUser } from "@/lib/types";
 
@@ -491,9 +492,9 @@ function LineageInner() {
             <Link href={`/people/${params.id}/yizi`}>
               <Button variant="secondary">一字图</Button>
             </Link>
-            <Link href="/people">
+            <PeopleListBackLink>
               <Button variant="ghost">返回列表</Button>
-            </Link>
+            </PeopleListBackLink>
           </div>
         }
       />
@@ -654,7 +655,7 @@ function LineageInner() {
           </div>
 
           <div className="mt-8 text-center text-xs text-muted">
-            点击人物卡片查看详情 · 青绿虚线为待审新增 · 子代每层最多展示 12 人
+            点击人物卡片查看详情 · 青绿虚线为待审新增 · 同层子代全部展示（可横向滚动）
           </div>
           </TableScroll>
         </Card>

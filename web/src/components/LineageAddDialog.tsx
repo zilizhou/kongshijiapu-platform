@@ -81,6 +81,8 @@ function seedToRow(seed: AnchorSeed): PeopleRow {
     professionalTitle: null,
     college: null,
     degree: null,
+    createTime: null,
+    createAdmin: null,
     editTime: null,
   };
 }

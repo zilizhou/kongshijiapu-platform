@@ -305,7 +305,8 @@ async function hydratePeople(ids: number[]): Promise<Map<number, PeopleRow>> {
     const rows = await query<RowDataPacket[]>(
       `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
               p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
-              p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT, p.F_EDIT_TIME,
+              p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT,
+              p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME,
               ${hasRelation ? "r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID" : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID"},
               ${
                 hasInfo
@@ -348,6 +349,8 @@ async function hydratePeople(ids: number[]): Promise<Map<number, PeopleRow>> {
         professionalTitle: r.F_PROFESSIONAL_TITLE ?? null,
         college: r.F_COLLEGE ?? null,
         degree: r.F_DEGREE ?? null,
+        createTime: r.F_CREATE_TIME ?? null,
+        createAdmin: r.F_CREATE_ADMIN ?? null,
         editTime: r.F_EDIT_TIME ?? null,
       });
     }
@@ -429,11 +432,8 @@ export async function buildPublishByBranch(
     };
   }
 
-  const PUBLISH_BRANCH_MAX = 20000;
   const take =
-    limit === "all"
-      ? PUBLISH_BRANCH_MAX
-      : Math.min(PUBLISH_BRANCH_MAX, Math.max(1, Math.floor(limit)));
+    limit === "all" ? null : Math.max(1, Math.floor(limit));
 
   const params: Record<string, unknown> = {};
   const groupClause = likeOrClause(
@@ -454,7 +454,7 @@ export async function buildPublishByBranch(
      FROM tb_people p
      WHERE ${groupClause}
      ORDER BY p.F_LEVEL IS NULL, p.F_LEVEL ASC, p.F_LEFT ASC, p.F_ID ASC
-     LIMIT ${take}`,
+     ${take != null ? `LIMIT ${take}` : ""}`,
     params,
   );
   const ids = idRows.map((r) => Number(r.F_ID));
@@ -465,15 +465,12 @@ export async function buildPublishByBranch(
 
   const childMap = await loadChildMap(people.map((p) => p.id));
 
-  const truncated = matchedTotal > people.length;
   const limitLabel =
     limit === "all" ? "全部" : `前 ${people.length} 人`;
   return {
     mode: "branch",
     title: formatGroupTitle(g),
-    subtitle: `派户支「${g}」· 匹配 ${matchedTotal} 人 · 本刊收录 ${people.length} 人（${limitLabel}${
-      truncated && limit === "all" ? `，上限 ${PUBLISH_BRANCH_MAX}` : ""
-    }）`,
+    subtitle: `派户支「${g}」· 匹配 ${matchedTotal} 人 · 本刊收录 ${people.length} 人（${limitLabel}）`,
     generations: groupByLevel(people, childMap),
     total: people.length,
   };

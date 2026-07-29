@@ -210,6 +210,7 @@ export function daikaoToPeoplePayload(
     professionalTitle: "",
     college: "",
     degree: "",
+    createTime: "",
     sourceDaikaoId: d.id,
   };
 }

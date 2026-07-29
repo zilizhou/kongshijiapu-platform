@@ -10,6 +10,7 @@ import {
   LineageContextMenu,
 } from "@/components/LineageAddDialog";
 import { PersonNodeDrawer } from "@/components/PersonNodeDrawer";
+import { PeopleListBackLink } from "@/components/PeopleListBackLink";
 import { Button, Card, PageHeader, TableScroll } from "@/components/ui";
 import type { PeopleRow, SessionUser } from "@/lib/types";
 
@@ -167,9 +168,9 @@ function YiziInner() {
             <Link href={`/people/${params.id}/lineage`}>
               <Button variant="secondary">世系图</Button>
             </Link>
-            <Link href="/people">
+            <PeopleListBackLink>
               <Button variant="ghost">返回列表</Button>
-            </Link>
+            </PeopleListBackLink>
           </div>
         }
       />

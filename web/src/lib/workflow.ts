@@ -391,7 +391,14 @@ export async function approveRequest(id: number, user: SessionUser) {
   if (!req) throw new Error("变更单不存在");
   assertCanReview(user, req.status);
 
-  if (req.status === "pending_1") {
+  // 终审可直接处理录入员/一二审待审单并落库生效（不必等二审送达）
+  const finalDirect =
+    user.role === "final" &&
+    (req.status === "pending_1" ||
+      req.status === "pending_2" ||
+      req.status === "pending_final");
+
+  if (!finalDirect && req.status === "pending_1") {
     await execute(
       `UPDATE app_change_requests SET status='pending_2', last_actor_id=:actorId, last_actor_name=:actorName WHERE id=:id`,
       { id, actorId: user.id, actorName: user.displayName },
@@ -399,7 +406,7 @@ export async function approveRequest(id: number, user: SessionUser) {
     await addEvent(id, user, "approve_1");
     return getRequestById(id);
   }
-  if (req.status === "pending_2") {
+  if (!finalDirect && req.status === "pending_2") {
     await execute(
       `UPDATE app_change_requests SET status='pending_final', last_actor_id=:actorId, last_actor_name=:actorName WHERE id=:id`,
       { id, actorId: user.id, actorName: user.displayName },
@@ -407,7 +414,7 @@ export async function approveRequest(id: number, user: SessionUser) {
     await addEvent(id, user, "approve_2");
     return getRequestById(id);
   }
-  if (req.status === "pending_final") {
+  if (finalDirect || req.status === "pending_final") {
     if (req.objectType === "branch") {
       const bp = req.payload as BranchPayload;
       if (req.operation === "create") {
@@ -605,7 +612,15 @@ function assertCanReview(user: SessionUser, status: RequestStatus) {
   if (user.role === "admin") return;
   if (status === "pending_1" && user.role === "first") return;
   if (status === "pending_2" && user.role === "second") return;
-  if (status === "pending_final" && user.role === "final") return;
+  // 终审可审：录入员刚提交、二审中、待终审
+  if (
+    user.role === "final" &&
+    (status === "pending_1" ||
+      status === "pending_2" ||
+      status === "pending_final")
+  ) {
+    return;
+  }
   throw new Error("当前账号无权审核该单据");
 }
 
@@ -638,8 +653,9 @@ export async function listRequests(opts: {
   } else if (opts.mode === "review") {
     if (opts.user.role === "first") where.push("status = 'pending_1'");
     else if (opts.user.role === "second") where.push("status = 'pending_2'");
-    else if (opts.user.role === "final") where.push("status = 'pending_final'");
-    else if (opts.user.role === "admin") {
+    else if (opts.user.role === "final") {
+      where.push("status IN ('pending_1','pending_2','pending_final')");
+    } else if (opts.user.role === "admin") {
       where.push("status IN ('pending_1','pending_2','pending_final')");
     } else {
       where.push("1=0");

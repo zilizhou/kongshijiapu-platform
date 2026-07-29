@@ -3,9 +3,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { peopleToPayload } from "@/lib/people-client";
+import {
+  peopleDataSourceHint,
+  peopleDataSourceLabel,
+  resolvePeopleDataSource,
+} from "@/lib/people-source";
 import { PeoplePayload, PeopleRow } from "@/lib/types";
 import { PeopleForm } from "./PeopleForm";
-import { Button } from "./ui";
+import { Button, DataSourcePill } from "./ui";
 
 function dash(v: string | null | undefined) {
   return v && String(v).trim() ? String(v) : "-";
@@ -120,14 +125,26 @@ export function PersonNodeDrawer({
       >
         <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
           <div>
-            <div className="font-display text-2xl text-ink">
-              {person?.name || (loading ? "加载中…" : "人物详情")}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="font-display text-2xl text-ink">
+                {person?.name || (loading ? "加载中…" : "人物详情")}
+              </div>
+              {person ? (
+                <DataSourcePill
+                  source={resolvePeopleDataSource(person)}
+                  title={peopleDataSourceHint(
+                    resolvePeopleDataSource(person),
+                  )}
+                />
+              ) : null}
             </div>
             {person ? (
               <div className="mt-1 text-sm text-muted">
                 {person.sex} · 第 {person.level ?? "?"} 世
                 {person.rank ? ` · ${person.rank}` : ""}
                 {person.isHeir === "1" ? " · 出嗣" : ""}
+                {" · "}
+                {peopleDataSourceLabel(resolvePeopleDataSource(person))}
               </div>
             ) : null}
           </div>
@@ -177,6 +194,11 @@ export function PersonNodeDrawer({
                   ["配偶信息", person.spouseInfo],
                   ["卷次", person.volume],
                   ["小传", person.description],
+                  [
+                    "数据来源",
+                    peopleDataSourceLabel(resolvePeopleDataSource(person)),
+                  ],
+                  ["录入时间", person.createTime],
                   ["更新时间", person.editTime],
                 ] as const
               ).map(([k, v]) => (

@@ -10,12 +10,25 @@ import {
   useState,
 } from "react";
 import { PeopleRow, SessionUser } from "@/lib/types";
+import {
+  buildPeopleListSearch,
+  loadPeopleListQuery,
+  needsMoreFilters,
+  parsePeopleListSearch,
+  savePeopleListQuery,
+} from "@/lib/people-list-query";
+import {
+  peopleDataSourceHint,
+  peopleDataSourceLabel,
+  resolvePeopleDataSource,
+} from "@/lib/people-source";
 import { BranchPicker } from "@/components/BranchPicker";
 import { PeopleImportDialog } from "@/components/PeopleImportDialog";
 import { PaginationBar } from "@/components/PaginationBar";
 import {
   Button,
   Card,
+  DataSourcePill,
   FilterBar,
   FilterField,
   Input,
@@ -109,6 +122,7 @@ export default function PeoplePage() {
   const [address, setAddress] = useState("");
   const [filters, setFilters] = useState<PeopleFilters>(emptyFilters);
   const [auditStatus, setAuditStatus] = useState("");
+  const [dataSource, setDataSource] = useState("");
   const [moreFilters, setMoreFilters] = useState(false);
   const [operable, setOperable] = useState(true);
   const [page, setPage] = useState(1);
@@ -121,6 +135,8 @@ export default function PeoplePage() {
   const [error, setError] = useState("");
   const [drawer, setDrawer] = useState<PeopleRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  /** 先从 sessionStorage 恢复查询条件，再发请求，避免返回列表时闪成全量 */
+  const [hydrated, setHydrated] = useState(false);
   const loadSeq = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -128,6 +144,43 @@ export default function PeoplePage() {
     fetch("/api/auth/me")
       .then((r) => r.json())
       .then((d) => setUser(d.user || null));
+  }, []);
+
+  useEffect(() => {
+    const stored = loadPeopleListQuery();
+    if (stored) {
+      const q0 = parsePeopleListSearch(stored);
+      setName(q0.name);
+      setFatherName(q0.fatherName);
+      setGrandfatherName(q0.grandfatherName);
+      setPinyin(q0.pinyin);
+      setZiHao(q0.ziHao);
+      setQ(q0.q);
+      setNo(q0.no);
+      setLevel(q0.level);
+      setGroup(q0.group);
+      setSex(q0.sex);
+      setAddress(q0.address);
+      setFilters({
+        name: q0.name,
+        fatherName: q0.fatherName,
+        grandfatherName: q0.grandfatherName,
+        pinyin: q0.pinyin,
+        ziHao: q0.ziHao,
+        q: q0.q,
+        no: q0.no,
+        level: q0.level,
+        group: q0.group,
+        sex: q0.sex,
+        address: q0.address,
+      });
+      setAuditStatus(q0.auditStatus);
+      setDataSource(q0.dataSource);
+      setPage(q0.page);
+      setPageSize(q0.pageSize);
+      if (needsMoreFilters(q0)) setMoreFilters(true);
+    }
+    setHydrated(true);
   }, []);
 
   const load = useCallback(async () => {
@@ -154,6 +207,9 @@ export default function PeoplePage() {
     if (filters.sex) sp.set("sex", filters.sex);
     if (filters.address) sp.set("address", filters.address);
     if (auditStatus) sp.set("auditStatus", auditStatus);
+    if (dataSource === "legacy" || dataSource === "platform") {
+      sp.set("dataSource", dataSource);
+    }
     try {
       const res = await fetch(`/api/people?${sp}`, { signal: ac.signal });
       const data = await res.json();
@@ -169,11 +225,25 @@ export default function PeoplePage() {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [page, pageSize, filters, auditStatus]);
+  }, [page, pageSize, filters, auditStatus, dataSource]);
 
   useEffect(() => {
+    if (!hydrated) return;
     load();
-  }, [load]);
+  }, [hydrated, load]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    savePeopleListQuery(
+      buildPeopleListSearch({
+        ...filters,
+        auditStatus,
+        dataSource,
+        page,
+        pageSize,
+      }),
+    );
+  }, [hydrated, filters, auditStatus, dataSource, page, pageSize]);
 
   function applySearch(next: PeopleFilters = {
     name,
@@ -205,6 +275,8 @@ export default function PeoplePage() {
     setSex("");
     setAddress("");
     setAuditStatus("");
+    setDataSource("");
+    savePeopleListQuery("");
     applySearch(emptyFilters);
   }
 
@@ -386,7 +458,8 @@ export default function PeoplePage() {
           <BranchPicker
             value={group}
             onChange={setGroup}
-            placeholder="派户支"
+            allowFuzzyText
+            placeholder="派户支（可只填户名）"
           />
         </FilterField>
         <FilterField className="w-24">
@@ -423,6 +496,20 @@ export default function PeoplePage() {
             <option value="pending_final">待终审</option>
             <option value="approved">终审通过</option>
             <option value="rejected">已驳回</option>
+          </Select>
+        </FilterField>
+        <FilterField className="w-32">
+          <Select
+            compact
+            value={dataSource}
+            onChange={(e) => {
+              setDataSource(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">数据来源</option>
+            <option value="legacy">旧谱底库</option>
+            <option value="platform">新录入</option>
           </Select>
         </FilterField>
         {moreFilters ? (
@@ -524,6 +611,7 @@ export default function PeoplePage() {
               <tr>
                 <th className="px-3 py-3 font-medium">序号</th>
                 <th className="px-3 py-3 font-medium">姓名</th>
+                <th className="px-3 py-3 font-medium">来源</th>
                 <th className="px-3 py-3 font-medium">父亲</th>
                 <th className="px-3 py-3 font-medium">性别</th>
                 <th className="px-3 py-3 font-medium">代数</th>
@@ -539,13 +627,13 @@ export default function PeoplePage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-3 py-10 text-center text-muted" colSpan={12}>
+                  <td className="px-3 py-10 text-center text-muted" colSpan={13}>
                     加载中...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-10 text-center text-muted" colSpan={12}>
+                  <td className="px-3 py-10 text-center text-muted" colSpan={13}>
                     无结果
                   </td>
                 </tr>
@@ -553,6 +641,7 @@ export default function PeoplePage() {
                 items.map((p, idx) => {
                   const isOpen = Boolean(expanded[p.id]);
                   const isLoadingKids = expandingId === p.id;
+                  const src = resolvePeopleDataSource(p);
                   return (
                   <Fragment key={p.id}>
                     <tr
@@ -566,6 +655,12 @@ export default function PeoplePage() {
                         {(page - 1) * pageSize + idx + 1}
                       </td>
                       <td className="px-3 py-3 font-medium">{p.name}</td>
+                      <td className="px-3 py-3">
+                        <DataSourcePill
+                          source={src}
+                          title={peopleDataSourceHint(src)}
+                        />
+                      </td>
                       <td className="px-3 py-3">{dash(p.parentName)}</td>
                       <td className="px-3 py-3">{p.sex}</td>
                       <td className="px-3 py-3">{p.level ?? "-"}</td>
@@ -611,7 +706,9 @@ export default function PeoplePage() {
                       </td>
                       <td className="px-3 py-3">{renderActions(p)}</td>
                     </tr>
-                    {expanded[p.id]?.map((c, cidx) => (
+                    {expanded[p.id]?.map((c, cidx) => {
+                      const cSrc = resolvePeopleDataSource(c);
+                      return (
                       <tr
                         key={`${p.id}-${c.id}`}
                         className="border-t border-t-[#d9c2a3] border-l-[3px] border-l-[#8b6914] bg-[#efe0cc]"
@@ -621,6 +718,12 @@ export default function PeoplePage() {
                         </td>
                         <td className="px-3 py-2 pl-8 font-medium text-[#4a3728]">
                           {c.name}
+                        </td>
+                        <td className="px-3 py-2">
+                          <DataSourcePill
+                            source={cSrc}
+                            title={peopleDataSourceHint(cSrc)}
+                          />
                         </td>
                         <td className="px-3 py-2">{dash(c.parentName)}</td>
                         <td className="px-3 py-2">{c.sex}</td>
@@ -641,7 +744,8 @@ export default function PeoplePage() {
                         <td className="px-3 py-2">-</td>
                         <td className="px-3 py-2">{renderActions(c)}</td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </Fragment>
                   );
                 })
@@ -675,10 +779,19 @@ export default function PeoplePage() {
           >
             <div className="mb-4 flex items-start justify-between">
               <div>
-                <div className="font-display text-2xl">{drawer.name}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="font-display text-2xl">{drawer.name}</div>
+                  <DataSourcePill
+                    source={resolvePeopleDataSource(drawer)}
+                    title={peopleDataSourceHint(
+                      resolvePeopleDataSource(drawer),
+                    )}
+                  />
+                </div>
                 <div className="text-sm text-muted">
                   {drawer.sex} · 第 {drawer.level ?? "?"} 世 ·{" "}
-                  {drawer.isHeir === "1" ? "出嗣" : "未出嗣"}
+                  {drawer.isHeir === "1" ? "出嗣" : "未出嗣"} ·{" "}
+                  {peopleDataSourceLabel(resolvePeopleDataSource(drawer))}
                 </div>
               </div>
               <Button variant="ghost" onClick={() => setDrawer(null)}>
@@ -695,6 +808,11 @@ export default function PeoplePage() {
                 ["卒年", drawer.deathday],
                 ["配偶", drawer.spouse],
                 ["配偶信息", drawer.spouseInfo],
+                [
+                  "数据来源",
+                  peopleDataSourceLabel(resolvePeopleDataSource(drawer)),
+                ],
+                ["录入时间", drawer.createTime],
                 ["更新时间", drawer.editTime],
                 ["卷次", drawer.volume],
                 ["小传", drawer.description],

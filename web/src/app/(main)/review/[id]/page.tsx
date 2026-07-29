@@ -16,10 +16,16 @@ import {
 } from "@/lib/types";
 import Link from "next/link";
 
-function approveLabel(status: ChangeRequest["status"]) {
+function approveLabel(
+  status: ChangeRequest["status"],
+  role: SessionUser["role"] | undefined,
+) {
+  // 终审任意待审通过即落库生效
+  if (role === "final" || status === "pending_final") {
+    return "保存并通过（生效）";
+  }
   if (status === "pending_1") return "保存并送二审";
   if (status === "pending_2") return "保存并送终审";
-  if (status === "pending_final") return "保存并通过（生效）";
   return "保存并通过";
 }
 
@@ -204,7 +210,7 @@ export default function ReviewDetailPage() {
 
       {item.beforeSnapshot && item.operation !== "create" ? (
         <Card className="mb-4 border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-950">
-          琥珀色高亮字段为相对库中原值的修改；下方「原值」可对照。一审/二审/终审均可改数据后送下一级（终审改完直接生效）。
+          琥珀色高亮字段为相对库中原值的修改；下方「原值」可对照。一审/二审可改后送下一级；终审改完直接生效，也可直接处理录入员刚提交的待审单。
         </Card>
       ) : null}
 
@@ -255,7 +261,7 @@ export default function ReviewDetailPage() {
             仅保存修改
           </Button>
           <Button disabled={busy} onClick={saveAndApprove}>
-            {approveLabel(item.status)}
+            {approveLabel(item.status, user?.role)}
           </Button>
           <Button disabled={busy} variant="danger" onClick={reject}>
             驳回至录入员

@@ -6,9 +6,11 @@ export async function GET(req: NextRequest) {
   try {
     await requireSession();
     const sp = req.nextUrl.searchParams;
+    const exactNameRaw = (sp.get("exactName") || "").toLowerCase();
     const data = await searchPeople({
       q: sp.get("q") || undefined,
       name: sp.get("name") || undefined,
+      exactName: ["1", "true", "yes"].includes(exactNameRaw),
       fatherName: sp.get("fatherName") || undefined,
       grandfatherName: sp.get("grandfatherName") || undefined,
       pinyin: sp.get("pinyin") || undefined,
@@ -20,6 +22,10 @@ export async function GET(req: NextRequest) {
       address: sp.get("address") || undefined,
       parentId: sp.get("parentId") ? Number(sp.get("parentId")) : undefined,
       auditStatus: sp.get("auditStatus") || undefined,
+      dataSource:
+        sp.get("dataSource") === "legacy" || sp.get("dataSource") === "platform"
+          ? (sp.get("dataSource") as "legacy" | "platform")
+          : undefined,
       page: sp.get("page") ? Number(sp.get("page")) : 1,
       pageSize: sp.get("pageSize") ? Number(sp.get("pageSize")) : 10,
     });

@@ -69,5 +69,6 @@ export function peopleToPayload(p: PeopleRow): PeoplePayload {
     professionalTitle: p.professionalTitle || "",
     college: p.college || "",
     degree: p.degree || "",
+    createTime: p.createTime || "",
   };
 }

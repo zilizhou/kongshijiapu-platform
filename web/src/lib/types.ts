@@ -111,6 +111,8 @@ export type PeoplePayload = {
   professionalTitle?: string;
   college?: string;
   degree?: string;
+  /** 录入时间（对应 F_CREATE_TIME，可手改；格式 YYYY-MM-DD HH:mm:ss） */
+  createTime?: string;
   /** 来源待考成员 ID；终审通过后回写待考入谱状态 */
   sourceDaikaoId?: number | null;
 };
@@ -148,6 +150,11 @@ export type PeopleRow = {
   professionalTitle: string | null;
   college: string | null;
   degree: string | null;
+  /** 录入时间 */
+  createTime: string | null;
+  /** 创建人账号标记；platform=本平台新录，空=旧谱底库 */
+  createAdmin: string | null;
+  /** 更新时间 */
   editTime: string | null;
   childCount?: number;
   /** 该人最新一条变更单状态；无变更单则为 null */

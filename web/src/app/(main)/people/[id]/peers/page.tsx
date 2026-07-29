@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { PeopleListBackLink } from "@/components/PeopleListBackLink";
 import { Button, Card, PageHeader, TableScroll } from "@/components/ui";
 import type { PeopleRow } from "@/lib/types";
 
@@ -46,9 +47,9 @@ export default function PeersPage() {
             <Link href={`/people/${params.id}/yizi`}>
               <Button variant="secondary">一字图</Button>
             </Link>
-            <Link href="/people">
+            <PeopleListBackLink>
               <Button variant="ghost">返回列表</Button>
-            </Link>
+            </PeopleListBackLink>
           </div>
         }
       />

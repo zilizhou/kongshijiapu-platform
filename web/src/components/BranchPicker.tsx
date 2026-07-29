@@ -14,11 +14,14 @@ export function BranchPicker({
   disabled,
   placeholder,
   onChange,
+  /** 允许把输入词直接作为模糊条件（如只知「某戶」不知支） */
+  allowFuzzyText = false,
 }: {
   value: string;
   disabled?: boolean;
   placeholder?: string;
   onChange: (group: string) => void;
+  allowFuzzyText?: boolean;
 }) {
   const [keyword, setKeyword] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
@@ -62,7 +65,17 @@ export function BranchPicker({
     }, 200);
   }
 
+  function commit(label: string) {
+    const v = label.trim();
+    if (!v) return;
+    onChange(v);
+    setSelected(true);
+    setKeyword("");
+    setOpen(false);
+  }
+
   const showSelected = selected && value && !keyword;
+  const fuzzyLabel = keyword.trim();
 
   return (
     <div ref={boxRef} className="relative">
@@ -91,7 +104,10 @@ export function BranchPicker({
           clearable
           disabled={disabled}
           value={keyword}
-          placeholder={placeholder || "输入名称搜索派户支"}
+          placeholder={
+            placeholder ||
+            (allowFuzzyText ? "输入户/支名，可模糊匹配" : "输入名称搜索派户支")
+          }
           onChange={(e) => {
             const v = e.target.value;
             setKeyword(v);
@@ -102,6 +118,11 @@ export function BranchPicker({
             if (!hits.length) search(keyword);
             else setOpen(true);
           }}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || !allowFuzzyText) return;
+            e.preventDefault();
+            if (fuzzyLabel) commit(fuzzyLabel);
+          }}
         />
       )}
       {open && !disabled ? (
@@ -109,7 +130,19 @@ export function BranchPicker({
           {loading ? (
             <div className="px-3 py-2 text-xs text-muted">搜索中...</div>
           ) : null}
-          {!loading && !hits.length ? (
+          {allowFuzzyText && fuzzyLabel ? (
+            <button
+              type="button"
+              className="block w-full border-b border-line px-3 py-2 text-left hover:bg-soft"
+              onClick={() => commit(fuzzyLabel)}
+            >
+              <div className="text-sm text-accent">模糊匹配「{fuzzyLabel}」</div>
+              <div className="text-[11px] text-muted">
+                包含该派/户/支名称的成员都会查出（不知具体支时用这个）
+              </div>
+            </button>
+          ) : null}
+          {!loading && !hits.length && !(allowFuzzyText && fuzzyLabel) ? (
             <div className="px-3 py-2 text-xs text-muted">无匹配派户支</div>
           ) : null}
           {hits.map((h) => (
@@ -117,17 +150,13 @@ export function BranchPicker({
               key={h.id}
               type="button"
               className="block w-full px-3 py-2 text-left hover:bg-soft"
-              onClick={() => {
-                const label = h.fullName || h.name;
-                onChange(label);
-                setSelected(true);
-                setKeyword("");
-                setOpen(false);
-              }}
+              onClick={() => commit(h.fullName || h.name)}
             >
               <div className="text-sm text-ink">{h.name}</div>
               {h.fullName && h.fullName !== h.name ? (
-                <div className="truncate text-[11px] text-muted">{h.fullName}</div>
+                <div className="truncate text-[11px] text-muted">
+                  {h.fullName}
+                </div>
               ) : null}
             </button>
           ))}

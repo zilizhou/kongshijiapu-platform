@@ -442,8 +442,36 @@ export function PeopleForm({
           onChange={(e) => set("degree", e.target.value)}
         />
       </Field>
+
+      <SectionTitle>系统信息</SectionTitle>
+      <Field label="录入时间" {...mark("createTime")}>
+        <Input
+          type="datetime-local"
+          disabled={disabled}
+          value={toDatetimeLocalValue(value.createTime || "")}
+          onChange={(e) =>
+            set("createTime", fromDatetimeLocalValue(e.target.value))
+          }
+        />
+        <p className="mt-1 text-xs text-muted">
+          可按实际补录时间修改；留空则新建时用当前时间。影响首页「年度成员增长」统计。
+        </p>
+      </Field>
     </div>
   );
+}
+
+/** datetime-local 用 YYYY-MM-DDTHH:mm */
+function toDatetimeLocalValue(v: string): string {
+  const s = (v || "").trim().replace(" ", "T");
+  if (!s) return "";
+  return s.slice(0, 16);
+}
+
+function fromDatetimeLocalValue(v: string): string {
+  const s = (v || "").trim();
+  if (!s) return "";
+  return s.replace("T", " ") + (s.length === 16 ? ":00" : "");
 }
 
 export const emptyPayload = (): PeoplePayload => ({
@@ -481,5 +509,12 @@ export const emptyPayload = (): PeoplePayload => ({
   professionalTitle: "",
   college: "",
   degree: "",
+  createTime: defaultCreateTime(),
   sourceDaikaoId: null,
 });
+
+function defaultCreateTime(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}

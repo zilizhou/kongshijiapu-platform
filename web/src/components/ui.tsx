@@ -157,6 +157,29 @@ export function StatusPill({ status }: { status: string }) {
   );
 }
 
+/** 旧谱底库 / 本平台新录入 */
+export function DataSourcePill({
+  source,
+  title,
+}: {
+  source: "legacy" | "platform";
+  title?: string;
+}) {
+  const cls =
+    source === "platform"
+      ? "bg-emerald-50 text-emerald-800"
+      : "bg-stone-100 text-stone-600";
+  const label = source === "platform" ? "新录入" : "旧谱";
+  return (
+    <span
+      title={title}
+      className={`inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${cls}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 export function PageHeader({
   title,
   desc,

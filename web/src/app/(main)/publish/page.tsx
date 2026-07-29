@@ -2,12 +2,27 @@
 
 import { useState } from "react";
 import { BranchPicker } from "@/components/BranchPicker";
-import { PersonPicker } from "@/components/PersonPicker";
 import { PublishSheet } from "@/components/PublishSheet";
-import { Button, Card, Label, PageHeader } from "@/components/ui";
+import { Button, Card, Input, Label, PageHeader } from "@/components/ui";
 import type { PublishPayload } from "@/lib/publish";
+import type { PeopleRow } from "@/lib/types";
 
 type Mode = "person" | "branch";
+
+type NameHit = Pick<
+  PeopleRow,
+  "id" | "name" | "sex" | "no" | "level" | "groupName" | "parentName" | "address"
+>;
+
+function formatGroup(g: string | null | undefined) {
+  if (!g) return "-";
+  const parts = g
+    .split(/[,，/]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!parts.length) return "-";
+  return parts.reverse().join("/");
+}
 
 function Stepper({
   label,
@@ -56,8 +71,42 @@ function Stepper({
   );
 }
 
+async function fetchExactNameHits(name: string): Promise<{
+  items: NameHit[];
+  total: number;
+}> {
+  const pageSize = 100;
+  const all: NameHit[] = [];
+  let page = 1;
+  let total = 0;
+
+  for (;;) {
+    const sp = new URLSearchParams({
+      name: name.trim(),
+      exactName: "1",
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    const res = await fetch(`/api/people?${sp}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "查找失败");
+    total = Number(data.total || 0);
+    const batch = (data.items || []) as NameHit[];
+    all.push(...batch);
+    if (all.length >= total || !batch.length || page >= 50) break;
+    page += 1;
+  }
+
+  return { items: all, total };
+}
+
 export default function PublishPage() {
   const [mode, setMode] = useState<Mode>("person");
+  const [personName, setPersonName] = useState("");
+  const [nameHits, setNameHits] = useState<NameHit[]>([]);
+  const [nameTotal, setNameTotal] = useState(0);
+  const [searchingName, setSearchingName] = useState(false);
+  const [nameSearched, setNameSearched] = useState(false);
   const [personId, setPersonId] = useState<number | null>(null);
   const [group, setGroup] = useState("");
   const [up, setUp] = useState(3);
@@ -72,13 +121,45 @@ export default function PublishPage() {
   const [error, setError] = useState("");
   const [queried, setQueried] = useState(false);
 
+  const selected = nameHits.find((h) => h.id === personId) || null;
+
   function resolveLimit(): string {
     if (limitPreset === "all") return "all";
     if (limitPreset === "custom") {
       const n = Number(String(customLimit).replace(/\D/g, ""));
-      return String(Math.max(1, Math.min(20000, n || 100)));
+      return String(Math.max(1, n || 100));
     }
     return limitPreset;
+  }
+
+  async function searchSameName() {
+    const q = personName.trim();
+    if (!q) {
+      setError("请输入姓名");
+      return;
+    }
+    setSearchingName(true);
+    setError("");
+    setNameSearched(true);
+    setPersonId(null);
+    setData(null);
+    setQueried(false);
+    try {
+      const { items, total } = await fetchExactNameHits(q);
+      setNameHits(items);
+      setNameTotal(total);
+      if (items.length === 1) {
+        setPersonId(items[0].id);
+      } else if (!items.length) {
+        setError(`未找到姓名为「${q}」的成员`);
+      }
+    } catch (e) {
+      setNameHits([]);
+      setNameTotal(0);
+      setError(e instanceof Error ? e.message : "查找失败");
+    } finally {
+      setSearchingName(false);
+    }
   }
 
   async function runQuery() {
@@ -88,7 +169,7 @@ export default function PublishPage() {
     try {
       const sp = new URLSearchParams({ mode });
       if (mode === "person") {
-        if (!personId) throw new Error("请选择起始人物");
+        if (!personId) throw new Error("请先查找并选择一位同名成员");
         sp.set("personId", String(personId));
         sp.set("up", String(up));
         sp.set("down", String(down));
@@ -110,6 +191,10 @@ export default function PublishPage() {
   }
 
   function reset() {
+    setPersonName("");
+    setNameHits([]);
+    setNameTotal(0);
+    setNameSearched(false);
     setPersonId(null);
     setGroup("");
     setUp(3);
@@ -152,7 +237,7 @@ export default function PublishPage() {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
         <Card className="publish-query-panel no-print h-fit space-y-4 p-5">
           <div className="font-display text-lg text-ink">查询条件</div>
 
@@ -193,16 +278,112 @@ export default function PublishPage() {
             <>
               <div>
                 <Label>
-                  <span className="text-accent">*</span> 起始人物
+                  <span className="text-accent">*</span> 姓名
                 </Label>
-                <PersonPicker
-                  valueId={personId}
-                  placeholder="输入姓名搜索"
-                  onChange={setPersonId}
-                />
+                <div className="flex gap-2">
+                  <Input
+                    clearable
+                    value={personName}
+                    placeholder="输入姓名，查找全部同名"
+                    onChange={(e) => {
+                      setPersonName(e.target.value);
+                      setNameSearched(false);
+                      setNameHits([]);
+                      setNameTotal(0);
+                      setPersonId(null);
+                      setData(null);
+                      setQueried(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void searchSameName();
+                      }
+                    }}
+                  />
+                  <Button
+                    variant="secondary"
+                    disabled={searchingName || loading}
+                    onClick={() => void searchSameName()}
+                  >
+                    {searchingName ? "查找中…" : "查找"}
+                  </Button>
+                </div>
               </div>
+
+              {nameSearched ? (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between text-xs text-muted">
+                    <span>
+                      {nameTotal > 0
+                        ? `共 ${nameTotal} 人同名「${personName.trim()}」`
+                        : "无同名结果"}
+                      {nameHits.length < nameTotal
+                        ? `（已载入 ${nameHits.length}）`
+                        : ""}
+                    </span>
+                    {selected ? (
+                      <span className="text-accent">已选 ID {selected.id}</span>
+                    ) : null}
+                  </div>
+                  {nameHits.length ? (
+                    <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-line bg-white p-1.5">
+                      {nameHits.map((h) => {
+                        const active = personId === h.id;
+                        return (
+                          <label
+                            key={h.id}
+                            className={`flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-soft ${
+                              active ? "bg-soft ring-1 ring-[#5b8fd9]/50" : ""
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              className="mt-0.5 accent-[#5b8fd9]"
+                              name="publish-person"
+                              checked={active}
+                              onChange={() => {
+                                setPersonId(h.id);
+                                setData(null);
+                                setQueried(false);
+                              }}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-medium text-ink">
+                                {h.name}
+                                <span className="ml-1.5 font-normal text-muted">
+                                  {h.sex}
+                                  {h.level != null ? ` · 第${h.level}世` : ""}
+                                  {h.no ? ` · 谱号 ${h.no}` : ""}
+                                </span>
+                              </span>
+                              <span className="mt-0.5 block text-[11px] leading-snug text-muted">
+                                父：{h.parentName || "-"}
+                                {" · "}
+                                {formatGroup(h.groupName)}
+                                {h.address ? ` · ${h.address}` : ""}
+                              </span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-xs text-muted">
+                  先按姓名查找，列出全部同名成员后再选择一人。
+                </p>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
-                <Stepper label="向上代数" value={up} min={0} max={10} onChange={setUp} />
+                <Stepper
+                  label="向上代数"
+                  value={up}
+                  min={0}
+                  max={10}
+                  onChange={setUp}
+                />
                 <Stepper
                   label="向下代数"
                   value={down}
@@ -220,8 +401,9 @@ export default function PublishPage() {
                 </Label>
                 <BranchPicker
                   value={group}
-                  placeholder="选择或搜索派户支"
+                  placeholder="派户支（可只填户名模糊匹配）"
                   onChange={setGroup}
+                  allowFuzzyText
                 />
               </div>
               <div>
@@ -264,15 +446,22 @@ export default function PublishPage() {
                   ) : null}
                 </div>
                 <p className="mt-1.5 text-xs text-muted">
-                  大派户支人数可能上万，「全部」单次最多收录 2 万人，按世次与谱序截取。
+                  大派户支可选「全部」收录匹配成员；人数很多时生成与打印会较慢，请按需选择。
                 </p>
               </div>
             </>
           )}
 
           <div className="flex gap-2 pt-1">
-            <Button disabled={loading} onClick={runQuery}>
-              {loading ? "生成中…" : "查询"}
+            <Button
+              disabled={
+                loading ||
+                searchingName ||
+                (mode === "person" && !personId)
+              }
+              onClick={() => void runQuery()}
+            >
+              {loading ? "生成中…" : "生成出版"}
             </Button>
             <Button variant="secondary" disabled={loading} onClick={reset}>
               重置
@@ -327,7 +516,7 @@ export default function PublishPage() {
                       按人物查询
                     </span>
                     <span className="text-muted">
-                      选择一位成员作为起点，设置向上向下代数
+                      输入姓名列出全部同名，选定一人后设置向上 / 向下代数
                     </span>
                   </li>
                   <li className="flex gap-2">

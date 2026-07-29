@@ -131,7 +131,7 @@ async function tableExists(name: string) {
 /**
  * 派户支选择器给的是 tb_branch.F_FULL_NAME（如「道溝戶費縣支」），
  * 人员表 F_GROUP 却是逗号分段（如「道溝戶,費縣支,零」）。
- * 本函数把查询词扩展成能匹配 F_GROUP 的模式列表。
+ * 本函数把查询词扩展成能匹配 F_GROUP 的模式列表（LIKE 子串匹配，支持只填户名）。
  */
 export async function resolvePeopleGroupPatterns(
   input: string,
@@ -139,6 +139,7 @@ export async function resolvePeopleGroupPatterns(
   const raw = (input || "").trim();
   if (!raw) return [];
 
+  // 始终保留原文/简繁变体：查询侧用 LIKE %词%，故「某戶」可命中其下各支
   const set = new Set<string>(searchTextVariants(raw));
 
   // 已有逗号：直接可用
@@ -165,12 +166,23 @@ export async function resolvePeopleGroupPatterns(
       `SELECT F_ID, F_NAME, F_FULL_NAME, F_PARENT_ID
        FROM tb_branch
        WHERE F_FULL_NAME = :v OR F_NAME = :v
-       ORDER BY (F_FULL_NAME = :v) DESC, F_ID ASC
-       LIMIT 8`,
-      { v },
+          OR F_NAME LIKE :vLike OR F_FULL_NAME LIKE :vLike
+       ORDER BY
+         (F_NAME = :v) DESC,
+         (F_FULL_NAME = :v) DESC,
+         (F_NAME LIKE :vLike) DESC,
+         F_ID ASC
+       LIMIT 20`,
+      { v, vLike: `%${v}%` },
     );
 
     for (const hit of hits) {
+      const hitName = (hit.F_NAME || "").trim();
+      // 户/派级节点：用短名做宽匹配，覆盖其下所有支
+      if (hitName && /[戶户派]$/.test(hitName)) {
+        for (const nv of searchTextVariants(hitName)) set.add(nv);
+      }
+
       const parts: string[] = [];
       let curId: number | null = Number(hit.F_ID);
       const seen = new Set<number>();
@@ -204,6 +216,12 @@ export async function resolvePeopleGroupPatterns(
         set.add(joined);
         // 也匹配末尾带「,零」的常见写法
         set.add(`${joined},零`);
+        // 路径中的户/派段单独加入，便于「只知户」命中
+        for (const part of parts) {
+          if (/[戶户派]$/.test(part)) {
+            for (const nv of searchTextVariants(part)) set.add(nv);
+          }
+        }
       }
     }
 

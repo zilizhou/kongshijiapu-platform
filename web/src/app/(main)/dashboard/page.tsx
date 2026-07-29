@@ -418,7 +418,7 @@ export default function DashboardPage() {
                   在「家谱管理」列表操作列点击对应按钮即可打开。
                 </li>
                 <li className="rounded-lg bg-soft px-3 py-3">
-                  审核流：录入 → 一审 → 二审 → 终审，驳回退回录入员。
+                  审核流：录入 → 一审 → 二审 → 终审（终审也可直接审录入员提交的单），驳回退回录入员。
                 </li>
               </ol>
             </Card>

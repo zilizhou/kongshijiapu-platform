@@ -90,7 +90,7 @@ export default function ReviewListPage() {
     <div>
       <PageHeader
         title="信息审核"
-        desc="家谱与派户支共用审流。一审改后可送二审，二审改后送终审，终审改后直接生效；修改字段会琥珀色高亮对照原值。"
+        desc="家谱与派户支共用审流。常规路径：一审→二审→终审；终审也可直接审核录入员提交的待审单并生效。修改字段会琥珀色高亮对照原值。"
       />
 
       <FilterBar

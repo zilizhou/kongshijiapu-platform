@@ -32,6 +32,8 @@ type PeopleDb = RowDataPacket & {
   F_IS_HEIR: string | null;
   F_ORIGINAL_DATA: string | null;
   F_LNG_LAT: string | null;
+  F_CREATE_TIME: string | null;
+  F_CREATE_ADMIN: string | null;
   F_EDIT_TIME: string | null;
   F_PARENT_ID: number | null;
   F_PARENT_NAME: string | null;
@@ -87,8 +89,32 @@ function mapRow(r: PeopleDb): PeopleRow {
     professionalTitle: r.F_PROFESSIONAL_TITLE ?? null,
     college: r.F_COLLEGE ?? null,
     degree: r.F_DEGREE ?? null,
+    createTime: r.F_CREATE_TIME || null,
+    createAdmin: r.F_CREATE_ADMIN || null,
     childCount: r.child_count ?? 0,
   };
+}
+
+/** 规范化录入时间；空则返回 "" */
+export function normalizeCreateTime(
+  input: string | null | undefined,
+): string {
+  const s = (input || "").trim().replace("T", " ");
+  if (!s) return "";
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(s)) return `${s}:00`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s} 00:00:00`;
+  return s;
+}
+
+function nowCreateTime(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function resolveCreateTime(payload: PeoplePayload): string {
+  return normalizeCreateTime(payload.createTime) || nowCreateTime();
 }
 
 /** 批量挂上每人最新变更单状态（按 id 最大 = 最近一次） */
@@ -154,6 +180,8 @@ function pinyinLikeClause(
 export async function searchPeople(opts: {
   q?: string;
   name?: string;
+  /** 姓名精确匹配（含简繁/异体变体），用于重名消歧 */
+  exactName?: boolean;
   /** 父亲姓名（谱上父 / 当前父） */
   fatherName?: string;
   /** 爷爷姓名（父之父） */
@@ -170,6 +198,8 @@ export async function searchPeople(opts: {
   parentId?: number;
   /** 按最新变更单状态筛选 */
   auditStatus?: string;
+  /** legacy=旧谱底库（非 platform）；platform=本平台新录 */
+  dataSource?: "legacy" | "platform";
   page?: number;
   pageSize?: number;
 }) {
@@ -190,9 +220,21 @@ export async function searchPeople(opts: {
     params.parentId = opts.parentId;
   }
   if (opts.name) {
-    where.push(
-      likeOrClause(["p.F_NAME"], searchTextVariants(opts.name), "name", params),
-    );
+    const nameVariants = searchTextVariants(opts.name);
+    if (opts.exactName) {
+      if (!nameVariants.length) {
+        where.push("1=0");
+      } else {
+        const parts = nameVariants.map((v, i) => {
+          const key = `ename${i}`;
+          params[key] = v;
+          return `p.F_NAME = :${key}`;
+        });
+        where.push(`(${parts.join(" OR ")})`);
+      }
+    } else {
+      where.push(likeOrClause(["p.F_NAME"], nameVariants, "name", params));
+    }
   }
   if (fatherName) {
     // 同时匹配关系表冗余父名与父亲现名，避免改名后查不到
@@ -259,6 +301,11 @@ export async function searchPeople(opts: {
         params,
       ),
     );
+  }
+  if (opts.dataSource === "platform") {
+    where.push("p.F_CREATE_ADMIN = 'platform'");
+  } else if (opts.dataSource === "legacy") {
+    where.push("(p.F_CREATE_ADMIN IS NULL OR p.F_CREATE_ADMIN = '')");
   }
   if (keyword) {
     const variants = searchTextVariants(keyword);
@@ -387,7 +434,8 @@ export async function searchPeople(opts: {
   const rows = await query<PeopleDb[]>(
     `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
-            p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT, p.F_EDIT_TIME,
+            p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT,
+            p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME,
             ${selectParent},
             NULL AS F_SPOUSE, NULL AS F_SPOUSE_INFO, NULL AS F_DESCRIPTION, NULL AS F_VOLUME,
             NULL AS F_PHONE, NULL AS F_COMPANY, NULL AS F_POSITION, NULL AS F_PROFESSIONAL_TITLE,
@@ -773,7 +821,8 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
   const rows = await query<PeopleDb[]>(
     `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
-            p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT, p.F_EDIT_TIME,
+            p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT,
+            p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME,
             ${hasRelation ? "r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID" : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID"},
             ${
               hasInfo
@@ -848,7 +897,8 @@ export async function getChildren(parentId: number) {
   // 列表展开只需轻量字段，避免 JOIN info / 相关子查询拖慢
   const liteSelect = `p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
-            p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT, p.F_EDIT_TIME,
+            p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT,
+            p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME,
             NULL AS F_SPOUSE, NULL AS F_SPOUSE_INFO, NULL AS F_DESCRIPTION, NULL AS F_VOLUME,
             NULL AS F_PHONE, NULL AS F_COMPANY, NULL AS F_POSITION, NULL AS F_PROFESSIONAL_TITLE,
             NULL AS F_COLLEGE, NULL AS F_DEGREE,
@@ -1090,18 +1140,20 @@ async function insertPeopleRow(
   const hao = normalizeCourtesyPart("hao", payload.hao);
   const legacyAlias = composeLegacyAlias(zi, hao, payload.alias || "");
 
+  const createTime = resolveCreateTime(payload);
   const [ins] = await conn.execute<ResultSetHeader>(
     `INSERT INTO tb_people
       (F_ADDRESS, F_ALIAS, F_BIRTHDAY, F_CHECK_ADMIN, F_CHECK_TIME, F_CREATE_ADMIN, F_CREATE_TIME,
        F_DEATHDAY, F_EDIT_ADMIN, F_EDIT_TIME, F_FLAG, F_GROUP, F_IS_HEIR, F_LEFT, F_LEVEL, F_NAME,
        F_NO, F_RIGHT, F_SEX, F_LNG_LAT, F_ORIGINAL_DATA, F_PINYIN)
-     VALUES (?, ?, ?, '', '', 'platform', DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s'),
+     VALUES (?, ?, ?, '', '', 'platform', ?,
              ?, '', '', ?, ?, ?, ?, ?, ?,
              ?, ?, ?, ?, ?, ?)`,
     [
       payload.address || "",
       legacyAlias,
       payload.birthday || "",
+      createTime,
       payload.deathday || "",
       opts.flag,
       opts.groupName,
@@ -1188,11 +1240,13 @@ export async function applyPeopleUpdate(
     payload.hao || "",
     payload.alias || "",
   );
+  const createTime = normalizeCreateTime(payload.createTime);
   await conn.execute(
     `UPDATE tb_people SET
       F_NAME = ?, F_SEX = ?, F_NO = ?, F_LEVEL = ?, F_GROUP = ?,
       F_BIRTHDAY = ?, F_DEATHDAY = ?, F_ADDRESS = ?, F_PINYIN = ?, F_ALIAS = ?,
       F_IS_HEIR = ?, F_ORIGINAL_DATA = ?, F_LNG_LAT = ?,
+      F_CREATE_TIME = CASE WHEN ? <> '' THEN ? ELSE F_CREATE_TIME END,
       F_EDIT_ADMIN = 'platform', F_EDIT_TIME = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')
      WHERE F_ID = ?`,
     [
@@ -1209,6 +1263,8 @@ export async function applyPeopleUpdate(
       payload.isHeir || "0",
       payload.originalData || "1",
       payload.lngLat || "",
+      createTime,
+      createTime,
       id,
     ],
   );
@@ -1773,11 +1829,16 @@ async function loadPendingCreates(
 
 type FlatNode = PeopleRow & { left: number; right: number };
 
+/**
+ * 世系图向下拉取的最大行数。
+ * 库内单人直接子代最多约 223；下延 6 代时最大子树约 5500+。
+ */
+const LINEAGE_DESCENDANT_ROW_LIMIT = 8000;
+
 function buildTreeFromFlat(
   focusId: number,
   flat: FlatNode[],
   maxDepth: number,
-  maxChildren = 12,
 ): LineageNode {
   const sorted = [...flat].sort((a, b) => a.left - b.left);
   const nodes = new Map<number, LineageNode>();
@@ -1816,7 +1877,7 @@ function buildTreeFromFlat(
     const kidRows = kidIds
       .map((cid) => flat.find((f) => f.id === cid))
       .filter(Boolean) as FlatNode[];
-    const ordered = sortByBirthOrder(kidRows).slice(0, maxChildren);
+    const ordered = sortByBirthOrder(kidRows);
     node.children = ordered.map((k, idx) => {
       const child = attach(k.id, depth + 1);
       child.rank = k.rank || rankLabelTraditional(k.sex, idx);
@@ -1874,7 +1935,7 @@ export async function getLineageTree(
          AND p.F_LEFT >= :l AND p.F_RIGHT <= :r
          AND p.F_LEVEL <= :maxLevel
        ORDER BY p.F_LEFT ASC
-       LIMIT 200`,
+       LIMIT ${LINEAGE_DESCENDANT_ROW_LIMIT}`,
       { l: Number(b.l), r: Number(b.r), maxLevel, flag: Number(b.flag || 0) },
     );
     const mappedRows = await attachSiblingMeta(rows.map(mapRow));
@@ -1886,10 +1947,10 @@ export async function getLineageTree(
         right: Number(rows[i]._right),
       };
     });
-    tree = buildTreeFromFlat(focus.id, flat, down, 12);
+    tree = buildTreeFromFlat(focus.id, flat, down);
   } else if (down > 0) {
     const kids = await getChildren(id);
-    tree.children = kids.slice(0, 12).map((k, idx) => {
+    tree.children = kids.map((k, idx) => {
       relatedIds.add(k.id);
       const node = toLineageNode(k);
       node.rank = k.rank || rankLabelTraditional(k.sex, idx);

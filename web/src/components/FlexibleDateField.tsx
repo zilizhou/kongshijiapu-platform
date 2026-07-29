@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Precision = "year" | "month" | "day";
 
@@ -13,7 +13,7 @@ function parseFlexible(value: string): {
   const v = (value || "").trim();
   const m = v.match(/^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$/);
   if (!m) {
-    return { year: "", month: "", day: "", precision: "day" };
+    return { year: "", month: "", day: "", precision: "year" };
   }
   const year = m[1];
   const month = m[2] ? m[2].padStart(2, "0") : "";
@@ -46,12 +46,37 @@ export function FlexibleDateField({
   placeholder?: string;
 }) {
   const parsed = useMemo(() => parseFlexible(value), [value]);
+  // 精度单独保存：仅有年份时字符串无法区分「仅年 / 年月 / 年月日」
+  const [precision, setPrecision] = useState<Precision>(
+    () => parseFlexible(value).precision,
+  );
+  const prevValue = useRef(value);
+
+  useEffect(() => {
+    if (value === prevValue.current) return;
+    const prev = prevValue.current;
+    prevValue.current = value;
+    if (!value) return;
+    const next = parseFlexible(value);
+    const prevParsed = parseFlexible(prev);
+    setPrecision((curr) => {
+      // 同一次编辑里值仍只有年份时，勿把用户选的「年月/年月日」打回「仅年」
+      if (
+        next.precision === "year" &&
+        (curr === "month" || curr === "day") &&
+        (!prev || next.year === prevParsed.year)
+      ) {
+        return curr;
+      }
+      return next.precision;
+    });
+  }, [value]);
+
   const years = useMemo(() => {
     const now = new Date().getFullYear();
     const list: number[] = [];
-    for (let y = now + 1; y >= -500; y--) list.push(y);
-    // genealogy often needs BCE-ish years as positive historic years; keep wide CE range
-    return list.filter((y) => y >= 1);
+    for (let y = now + 1; y >= 1; y--) list.push(y);
+    return list;
   }, []);
 
   const daysInMonth = useMemo(() => {
@@ -68,17 +93,20 @@ export function FlexibleDateField({
     const year = next.year ?? parsed.year;
     const month = next.month ?? parsed.month;
     let day = next.day ?? parsed.day;
-    const precision = next.precision ?? parsed.precision;
-    if (precision !== "day") day = "";
-    if (precision === "year") {
+    const nextPrecision = next.precision ?? precision;
+    if (next.precision) setPrecision(next.precision);
+    if (nextPrecision !== "day") day = "";
+    if (nextPrecision === "year") {
       onChange(compose(year, "", "", "year"));
       return;
     }
     if (day) {
-      const max = year && month ? new Date(Number(year), Number(month), 0).getDate() : 31;
+      const max =
+        year && month ? new Date(Number(year), Number(month), 0).getDate() : 31;
       if (Number(day) > max) day = String(max).padStart(2, "0");
     }
-    onChange(compose(year, month, day, precision));
+    // 年月精度但尚未选月时，仍只存年份；精度靠本地 state 保留
+    onChange(compose(year, month, day, nextPrecision));
   }
 
   return (
@@ -97,7 +125,7 @@ export function FlexibleDateField({
             disabled={disabled}
             onClick={() => update({ precision: key })}
             className={`rounded-md px-2 py-1 text-xs transition ${
-              parsed.precision === key
+              precision === key
                 ? "bg-accent text-white"
                 : "border border-line bg-white text-muted hover:bg-soft"
             }`}
@@ -130,7 +158,7 @@ export function FlexibleDateField({
             </option>
           ))}
         </select>
-        {parsed.precision !== "year" ? (
+        {precision !== "year" ? (
           <select
             disabled={disabled || !parsed.year}
             className={`${selectCls} min-w-[88px]`}
@@ -148,7 +176,7 @@ export function FlexibleDateField({
             })}
           </select>
         ) : null}
-        {parsed.precision === "day" ? (
+        {precision === "day" ? (
           <select
             disabled={disabled || !parsed.year || !parsed.month}
             className={`${selectCls} min-w-[88px]`}

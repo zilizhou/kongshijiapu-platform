@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
+import { PeopleListBackLink } from "@/components/PeopleListBackLink";
 import { Button, Card } from "@/components/ui";
 import { peopleToPayload } from "@/lib/people-client";
 import { PeoplePayload, PeopleRow } from "@/lib/types";
@@ -141,13 +142,22 @@ function NewEditInner() {
               </p>
             ) : null}
           </div>
-          <Link
-            href={isAdmit ? "/daikao" : "/people"}
-            className="text-xl leading-none text-muted hover:text-ink"
-            aria-label="关闭"
-          >
-            ×
-          </Link>
+          {isAdmit ? (
+            <Link
+              href="/daikao"
+              className="text-xl leading-none text-muted hover:text-ink"
+              aria-label="关闭"
+            >
+              ×
+            </Link>
+          ) : (
+            <PeopleListBackLink
+              className="text-xl leading-none text-muted hover:text-ink"
+              aria-label="关闭"
+            >
+              ×
+            </PeopleListBackLink>
+          )}
         </div>
 
         <div className="max-h-[calc(100vh-220px)] overflow-y-auto px-5 py-5">
@@ -199,11 +209,19 @@ function NewEditInner() {
         </div>
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-line bg-soft/40 px-5 py-4">
-          <Link href={isAdmit ? "/daikao" : "/people"}>
-            <Button variant="secondary" disabled={saving}>
-              取消
-            </Button>
-          </Link>
+          {isAdmit ? (
+            <Link href="/daikao">
+              <Button variant="secondary" disabled={saving}>
+                取消
+              </Button>
+            </Link>
+          ) : (
+            <PeopleListBackLink>
+              <Button variant="secondary" disabled={saving}>
+                取消
+              </Button>
+            </PeopleListBackLink>
+          )}
           <Button
             disabled={saving || loading}
             variant="secondary"
