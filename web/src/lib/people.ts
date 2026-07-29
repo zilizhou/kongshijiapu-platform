@@ -911,15 +911,25 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
         person.parentName = parent.name;
       }
     }
+    // 仅查排行元数据，避免 getChildren 拉全量兄弟拖慢详情/世系
     if ((!person.rank || person.siblingOrder == null) && person.parentId) {
-      const siblings = await getChildren(person.parentId);
-      const idx = siblings.findIndex((s) => s.id === id);
-      if (idx >= 0) {
-        const self = siblings[idx];
-        person.rank =
-          person.rank || self.rank || rankLabelTraditional(person.sex, idx);
-        person.siblingOrder =
-          person.siblingOrder ?? self.siblingOrder ?? idx;
+      try {
+        await ensureSiblingOrderTable();
+        const so = await query<RowDataPacket[]>(
+          `SELECT sort_no, rank_label FROM app_sibling_order
+           WHERE people_id = :id LIMIT 1`,
+          { id },
+        );
+        if (so[0]) {
+          person.siblingOrder =
+            person.siblingOrder ?? Number(so[0].sort_no);
+          person.rank =
+            person.rank ||
+            String(so[0].rank_label || "") ||
+            rankLabelTraditional(person.sex, Number(so[0].sort_no) || 0);
+        }
+      } catch {
+        /* ignore */
       }
     }
   } catch {
@@ -953,9 +963,50 @@ export async function getChildren(parentId: number) {
             NULL AS F_COLLEGE, NULL AS F_DEGREE,
             CASE WHEN (p.F_RIGHT - p.F_LEFT) > 1 THEN 1 ELSE 0 END AS child_count`;
 
-  // nested-set 按 F_FLAG 分树；左右值会跨派系重复，必须带 F_FLAG，否则会串支。
-  await ensurePeopleIndexes();
   await ensureSiblingOrderTable();
+
+  // 快路径：relation（含平台新录）+ sibling_order；避免 nested-set OR 扫全表
+  if (hasRelation) {
+    const rows = await query<PeopleDb[]>(
+      `SELECT ${liteSelect},
+              r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID
+       FROM tb_people p
+       LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID
+       WHERE r.F_PARENT_ID = :parentId
+          OR p.F_ID IN (SELECT people_id FROM app_sibling_order WHERE parent_id = :parentId)
+       ORDER BY
+         (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END),
+         p.F_LEFT ASC, p.F_NO ASC, p.F_ID ASC
+       LIMIT 200`,
+      { parentId },
+    );
+    const seen = new Set<number>();
+    const unique = rows.filter((r) => {
+      const id = Number(r.F_ID);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    // 补父名（sibling_order 命中但无 relation 时）
+    const parents = await query<RowDataPacket[]>(
+      `SELECT F_NAME FROM tb_people WHERE F_ID = :parentId LIMIT 1`,
+      { parentId },
+    );
+    const parentName = parents[0] ? String(parents[0].F_NAME || "") : "";
+    const mapped = unique.map((r) => {
+      const m = mapRow(r);
+      if (!m.parentId) {
+        m.parentId = parentId;
+        m.parentName = parentName || m.parentName;
+      }
+      return m;
+    });
+    const attached = await attachSiblingMeta(mapped);
+    return attachLatestReviewStatus(annotateRanks(sortByBirthOrder(attached)));
+  }
+
+  // 无 relation 表时才走 nested-set
+  await ensurePeopleIndexes();
   const parents = await query<
     (RowDataPacket & {
       F_LEFT: number;
@@ -973,29 +1024,19 @@ export async function getChildren(parentId: number) {
   if (!parent) return [];
 
   const flag = Number(parent.F_FLAG || 0);
-  // 合并三路：relation（新录入挂靠）+ nested-set 旧谱子代 + sibling_order
-  // 新录入 left/right 在序列末尾，不在父节点 nested-set 区间内，只查 nested-set 会漏人。
   const rows = await query<PeopleDb[]>(
     `SELECT ${liteSelect},
             :parentId AS F_PARENT_ID, :parentName AS F_PARENT_NAME,
-            ${hasRelation ? "r.F_FATHER_ID" : "NULL AS F_FATHER_ID"}
+            NULL AS F_FATHER_ID
      FROM tb_people p
-     ${hasRelation ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID" : ""}
      WHERE (
-       ${
-         hasRelation
-           ? "r.F_PARENT_ID = :parentId OR"
-           : ""
-       }
        (
          p.F_LEFT > :left AND p.F_RIGHT < :right AND p.F_LEVEL = :childLevel
          AND (:flag = 0 OR p.F_FLAG = :flag)
        )
        OR p.F_ID IN (SELECT people_id FROM app_sibling_order WHERE parent_id = :parentId)
      )
-     ORDER BY
-       (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END),
-       p.F_LEFT ASC, p.F_NO ASC, p.F_ID ASC
+     ORDER BY p.F_LEFT ASC, p.F_NO ASC, p.F_ID ASC
      LIMIT 200`,
     {
       parentId,
@@ -1006,15 +1047,7 @@ export async function getChildren(parentId: number) {
       flag,
     },
   );
-  // 去重（三路可能重叠）
-  const seen = new Set<number>();
-  const unique = rows.filter((r) => {
-    const id = Number(r.F_ID);
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
-  });
-  const attached = await attachSiblingMeta(unique.map(mapRow));
+  const attached = await attachSiblingMeta(rows.map(mapRow));
   return attachLatestReviewStatus(annotateRanks(sortByBirthOrder(attached)));
 }
 
@@ -1885,8 +1918,9 @@ type FlatNode = PeopleRow & { left: number; right: number };
  * nested-set 单次拉取上限（仅用于区间较小的根）。
  */
 const LINEAGE_NODE_BUDGET = 400;
-const LINEAGE_NESTED_SPAN_MAX = 4000;
-const LINEAGE_DESCENDANT_ROW_LIMIT = 2000;
+/** nested-set 区间超过此值则改走关系表 BFS，避免大范围扫表 */
+const LINEAGE_NESTED_SPAN_MAX = 800;
+const LINEAGE_DESCENDANT_ROW_LIMIT = 800;
 
 function buildTreeFromFlat(
   rootId: number,
