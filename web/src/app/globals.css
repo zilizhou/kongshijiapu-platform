@@ -43,6 +43,62 @@ h3,
   box-sizing: border-box;
 }
 
+/* 世系图：兄弟横线两端下折（┌─┬─┐） */
+.lineage-sibs {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: flex-start;
+}
+.lineage-sib {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 8px 0;
+}
+.lineage-sib::before,
+.lineage-sib::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: 14px;
+  border-color: #8a9bb0;
+  border-style: solid;
+  border-width: 0;
+  pointer-events: none;
+}
+.lineage-sib::before {
+  right: 50%;
+  border-top-width: 2px;
+}
+.lineage-sib::after {
+  left: 50%;
+  border-top-width: 2px;
+  border-left-width: 2px;
+}
+.lineage-sib:first-child::before {
+  border-top-width: 0;
+}
+.lineage-sib:last-child::after {
+  border-top-width: 0;
+}
+.lineage-sib:only-child::before,
+.lineage-sib:only-child::after {
+  border-width: 0;
+}
+.lineage-sib:only-child::after {
+  border-left-width: 2px;
+  border-left-style: solid;
+  border-left-color: #8a9bb0;
+  width: 0;
+  left: calc(50% - 1px);
+}
+.lineage-sib:only-child {
+  padding-top: 14px;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
