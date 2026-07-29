@@ -1,9 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { BranchPicker } from "@/components/BranchPicker";
 import { PublishSheet } from "@/components/PublishSheet";
-import { Button, Card, Input, Label, PageHeader } from "@/components/ui";
+import {
+  Button,
+  Card,
+  FilterField,
+  Input,
+  Label,
+  PageHeader,
+  Select,
+  TableScroll,
+  tableHeadClass,
+} from "@/components/ui";
 import type { PublishPayload } from "@/lib/publish";
 import type { PeopleRow } from "@/lib/types";
 
@@ -11,8 +21,40 @@ type Mode = "person" | "branch";
 
 type NameHit = Pick<
   PeopleRow,
-  "id" | "name" | "sex" | "no" | "level" | "groupName" | "parentName" | "address"
+  | "id"
+  | "name"
+  | "sex"
+  | "no"
+  | "level"
+  | "groupName"
+  | "parentName"
+  | "address"
+  | "birthday"
+  | "deathday"
+  | "alias"
+  | "spouse"
+  | "pinyin"
+  | "volume"
+  | "rank"
 >;
+
+type HitFilter = {
+  father: string;
+  level: string;
+  no: string;
+  group: string;
+  address: string;
+  sex: string;
+};
+
+const emptyHitFilter: HitFilter = {
+  father: "",
+  level: "",
+  no: "",
+  group: "",
+  address: "",
+  sex: "",
+};
 
 function formatGroup(g: string | null | undefined) {
   if (!g) return "-";
@@ -22,6 +64,16 @@ function formatGroup(g: string | null | undefined) {
     .filter(Boolean);
   if (!parts.length) return "-";
   return parts.reverse().join("/");
+}
+
+function dash(v: string | null | undefined) {
+  return v && String(v).trim() ? String(v) : "-";
+}
+
+function includesCI(hay: string | null | undefined, needle: string) {
+  const n = needle.trim().toLowerCase();
+  if (!n) return true;
+  return (hay || "").toLowerCase().includes(n);
 }
 
 function Stepper({
@@ -107,6 +159,7 @@ export default function PublishPage() {
   const [nameTotal, setNameTotal] = useState(0);
   const [searchingName, setSearchingName] = useState(false);
   const [nameSearched, setNameSearched] = useState(false);
+  const [hitFilter, setHitFilter] = useState<HitFilter>(emptyHitFilter);
   const [personId, setPersonId] = useState<number | null>(null);
   const [group, setGroup] = useState("");
   const [up, setUp] = useState(3);
@@ -123,6 +176,30 @@ export default function PublishPage() {
 
   const selected = nameHits.find((h) => h.id === personId) || null;
 
+  const filteredHits = useMemo(() => {
+    return nameHits.filter((h) => {
+      if (hitFilter.sex && h.sex !== hitFilter.sex) return false;
+      if (hitFilter.level.trim()) {
+        const lv = Number(hitFilter.level.replace(/\D/g, ""));
+        if (Number.isFinite(lv) && h.level !== lv) return false;
+      }
+      if (!includesCI(h.parentName, hitFilter.father)) return false;
+      if (!includesCI(h.no, hitFilter.no)) return false;
+      if (
+        !includesCI(h.groupName, hitFilter.group) &&
+        !includesCI(formatGroup(h.groupName), hitFilter.group)
+      ) {
+        return false;
+      }
+      if (!includesCI(h.address, hitFilter.address)) return false;
+      return true;
+    });
+  }, [nameHits, hitFilter]);
+
+  /** 查找后、尚未生成出版稿时，在右侧展示同名候选表 */
+  const showNamePicker =
+    mode === "person" && nameSearched && nameHits.length > 0 && !data && !queried;
+
   function resolveLimit(): string {
     if (limitPreset === "all") return "all";
     if (limitPreset === "custom") {
@@ -130,6 +207,12 @@ export default function PublishPage() {
       return String(Math.max(1, n || 100));
     }
     return limitPreset;
+  }
+
+  function pickPerson(id: number) {
+    setPersonId(id);
+    setData(null);
+    setQueried(false);
   }
 
   async function searchSameName() {
@@ -142,6 +225,7 @@ export default function PublishPage() {
     setError("");
     setNameSearched(true);
     setPersonId(null);
+    setHitFilter(emptyHitFilter);
     setData(null);
     setQueried(false);
     try {
@@ -195,6 +279,7 @@ export default function PublishPage() {
     setNameHits([]);
     setNameTotal(0);
     setNameSearched(false);
+    setHitFilter(emptyHitFilter);
     setPersonId(null);
     setGroup("");
     setUp(3);
@@ -237,7 +322,7 @@ export default function PublishPage() {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
+      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
         <Card className="publish-query-panel no-print h-fit space-y-4 p-5">
           <div className="font-display text-lg text-ink">查询条件</div>
 
@@ -290,6 +375,7 @@ export default function PublishPage() {
                       setNameSearched(false);
                       setNameHits([]);
                       setNameTotal(0);
+                      setHitFilter(emptyHitFilter);
                       setPersonId(null);
                       setData(null);
                       setQueried(false);
@@ -309,72 +395,61 @@ export default function PublishPage() {
                     {searchingName ? "查找中…" : "查找"}
                   </Button>
                 </div>
+                {!nameSearched ? (
+                  <p className="mt-1.5 text-xs text-muted">
+                    查找后在右侧表格中筛选并选定一人。
+                  </p>
+                ) : nameTotal > 0 ? (
+                  <p className="mt-1.5 text-xs text-muted">
+                    共 {nameTotal} 人同名
+                    {nameHits.length < nameTotal
+                      ? `（已载入 ${nameHits.length}）`
+                      : ""}
+                    ，请在右侧选定。
+                  </p>
+                ) : (
+                  <p className="mt-1.5 text-xs text-muted">无同名结果</p>
+                )}
               </div>
 
-              {nameSearched ? (
-                <div>
-                  <div className="mb-1.5 flex items-center justify-between text-xs text-muted">
-                    <span>
-                      {nameTotal > 0
-                        ? `共 ${nameTotal} 人同名「${personName.trim()}」`
-                        : "无同名结果"}
-                      {nameHits.length < nameTotal
-                        ? `（已载入 ${nameHits.length}）`
-                        : ""}
+              {selected ? (
+                <div className="rounded-lg border border-[#5b8fd9]/40 bg-[#5b8fd9]/5 px-3 py-2.5 text-sm">
+                  <div className="mb-1 text-xs text-muted">已选成员</div>
+                  <div className="font-medium text-ink">
+                    {selected.name}
+                    <span className="ml-1.5 font-normal text-muted">
+                      {selected.sex}
+                      {selected.level != null ? ` · 第${selected.level}世` : ""}
                     </span>
-                    {selected ? (
-                      <span className="text-accent">已选 ID {selected.id}</span>
+                  </div>
+                  <div className="mt-1 space-y-0.5 text-xs leading-relaxed text-muted">
+                    <div>谱号 {dash(selected.no)} · ID {selected.id}</div>
+                    <div>父：{dash(selected.parentName)}</div>
+                    <div className="break-all">
+                      {formatGroup(selected.groupName)}
+                    </div>
+                    {selected.address ? (
+                      <div className="break-all">{selected.address}</div>
                     ) : null}
                   </div>
-                  {nameHits.length ? (
-                    <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-line bg-white p-1.5">
-                      {nameHits.map((h) => {
-                        const active = personId === h.id;
-                        return (
-                          <label
-                            key={h.id}
-                            className={`flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-soft ${
-                              active ? "bg-soft ring-1 ring-[#5b8fd9]/50" : ""
-                            }`}
-                          >
-                            <input
-                              type="radio"
-                              className="mt-0.5 accent-[#5b8fd9]"
-                              name="publish-person"
-                              checked={active}
-                              onChange={() => {
-                                setPersonId(h.id);
-                                setData(null);
-                                setQueried(false);
-                              }}
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-sm font-medium text-ink">
-                                {h.name}
-                                <span className="ml-1.5 font-normal text-muted">
-                                  {h.sex}
-                                  {h.level != null ? ` · 第${h.level}世` : ""}
-                                  {h.no ? ` · 谱号 ${h.no}` : ""}
-                                </span>
-                              </span>
-                              <span className="mt-0.5 block text-[11px] leading-snug text-muted">
-                                父：{h.parentName || "-"}
-                                {" · "}
-                                {formatGroup(h.groupName)}
-                                {h.address ? ` · ${h.address}` : ""}
-                              </span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
+                  {data || queried ? (
+                    <button
+                      type="button"
+                      className="mt-2 text-xs text-[#5b8fd9] hover:underline"
+                      onClick={() => {
+                        setData(null);
+                        setQueried(false);
+                      }}
+                    >
+                      返回同名列表重选
+                    </button>
                   ) : null}
                 </div>
-              ) : (
-                <p className="text-xs text-muted">
-                  先按姓名查找，列出全部同名成员后再选择一人。
+              ) : nameSearched && nameHits.length > 0 ? (
+                <p className="rounded-lg border border-dashed border-line bg-soft/50 px-3 py-2 text-xs text-muted">
+                  尚未选定。可在右侧用父亲、世次、谱号、派户支等缩小范围后点选一行。
                 </p>
-              )}
+              ) : null}
 
               <div className="grid grid-cols-2 gap-3">
                 <Stepper
@@ -471,7 +546,243 @@ export default function PublishPage() {
         </Card>
 
         <Card className="publish-result-card overflow-hidden p-5">
-          {!queried && !data ? (
+          {showNamePicker ? (
+            <div className="no-print space-y-3">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <div className="font-display text-lg text-ink">
+                    同名「{personName.trim()}」候选
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted">
+                    共 {nameTotal} 人
+                    {filteredHits.length !== nameHits.length
+                      ? ` · 筛选后 ${filteredHits.length} 人`
+                      : ""}
+                    {selected ? ` · 已选 ID ${selected.id}` : " · 点击一行选定"}
+                  </p>
+                </div>
+                {(hitFilter.father ||
+                  hitFilter.level ||
+                  hitFilter.no ||
+                  hitFilter.group ||
+                  hitFilter.address ||
+                  hitFilter.sex) && (
+                  <button
+                    type="button"
+                    className="text-xs text-[#5b8fd9] hover:underline"
+                    onClick={() => setHitFilter(emptyHitFilter)}
+                  >
+                    清空筛选
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-soft/40 px-3 py-2">
+                <FilterField className="w-28">
+                  <Input
+                    compact
+                    clearable
+                    value={hitFilter.father}
+                    onChange={(e) =>
+                      setHitFilter((f) => ({ ...f, father: e.target.value }))
+                    }
+                    placeholder="父亲姓名"
+                  />
+                </FilterField>
+                <FilterField className="w-20">
+                  <Input
+                    compact
+                    clearable
+                    value={hitFilter.level}
+                    onChange={(e) =>
+                      setHitFilter((f) => ({ ...f, level: e.target.value }))
+                    }
+                    placeholder="世次"
+                  />
+                </FilterField>
+                <FilterField className="w-28">
+                  <Input
+                    compact
+                    clearable
+                    value={hitFilter.no}
+                    onChange={(e) =>
+                      setHitFilter((f) => ({ ...f, no: e.target.value }))
+                    }
+                    placeholder="谱号"
+                  />
+                </FilterField>
+                <FilterField className="w-40">
+                  <Input
+                    compact
+                    clearable
+                    value={hitFilter.group}
+                    onChange={(e) =>
+                      setHitFilter((f) => ({ ...f, group: e.target.value }))
+                    }
+                    placeholder="派户支"
+                  />
+                </FilterField>
+                <FilterField className="w-36">
+                  <Input
+                    compact
+                    clearable
+                    value={hitFilter.address}
+                    onChange={(e) =>
+                      setHitFilter((f) => ({ ...f, address: e.target.value }))
+                    }
+                    placeholder="住址"
+                  />
+                </FilterField>
+                <FilterField className="w-24">
+                  <Select
+                    compact
+                    value={hitFilter.sex}
+                    onChange={(e) =>
+                      setHitFilter((f) => ({ ...f, sex: e.target.value }))
+                    }
+                  >
+                    <option value="">性别</option>
+                    <option value="男">男</option>
+                    <option value="女">女</option>
+                  </Select>
+                </FilterField>
+              </div>
+
+              <TableScroll className="max-h-[min(68vh,calc(100vh-260px))] rounded-lg border border-line">
+                <table className="min-w-[980px] w-full text-sm">
+                  <thead className={tableHeadClass}>
+                    <tr>
+                      <th className="w-10 px-2 py-2.5 text-center font-medium">
+                        选
+                      </th>
+                      <th className="w-12 px-2 py-2.5 font-medium">#</th>
+                      <th className="px-3 py-2.5 font-medium">姓名</th>
+                      <th className="px-2 py-2.5 font-medium">性别</th>
+                      <th className="px-2 py-2.5 font-medium">世次</th>
+                      <th className="px-3 py-2.5 font-medium">谱号</th>
+                      <th className="px-3 py-2.5 font-medium">父亲</th>
+                      <th className="px-3 py-2.5 font-medium">派户支</th>
+                      <th className="px-3 py-2.5 font-medium">生卒</th>
+                      <th className="px-3 py-2.5 font-medium">住址</th>
+                      <th className="px-3 py-2.5 font-medium">配偶</th>
+                      <th className="px-3 py-2.5 font-medium">别名</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredHits.length === 0 ? (
+                      <tr>
+                        <td
+                          className="px-3 py-10 text-center text-muted"
+                          colSpan={12}
+                        >
+                          当前筛选无匹配，请调整筛选条件
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredHits.map((h, idx) => {
+                        const active = personId === h.id;
+                        const life =
+                          h.birthday || h.deathday
+                            ? `${dash(h.birthday)}～${dash(h.deathday)}`
+                            : "-";
+                        return (
+                          <tr
+                            key={h.id}
+                            className={`cursor-pointer border-t border-line/70 ${
+                              active
+                                ? "bg-[#e8f1fb] ring-1 ring-inset ring-[#5b8fd9]/40"
+                                : "hover:bg-soft/50"
+                            }`}
+                            onClick={() => pickPerson(h.id)}
+                          >
+                            <td className="px-2 py-2.5 text-center">
+                              <input
+                                type="radio"
+                                className="accent-[#5b8fd9]"
+                                name="publish-person"
+                                checked={active}
+                                onChange={() => pickPerson(h.id)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </td>
+                            <td className="px-2 py-2.5 text-muted">{idx + 1}</td>
+                            <td className="px-3 py-2.5 font-medium text-ink">
+                              {h.name}
+                              {h.rank ? (
+                                <span className="ml-1 text-xs font-normal text-muted">
+                                  {h.rank}
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-2 py-2.5">{h.sex}</td>
+                            <td className="px-2 py-2.5">
+                              {h.level != null ? h.level : "-"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs">
+                              {dash(h.no)}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {dash(h.parentName)}
+                            </td>
+                            <td
+                              className="max-w-[200px] truncate px-3 py-2.5"
+                              title={formatGroup(h.groupName)}
+                            >
+                              {formatGroup(h.groupName)}
+                            </td>
+                            <td
+                              className="max-w-[140px] truncate whitespace-nowrap px-3 py-2.5 text-xs text-muted"
+                              title={life}
+                            >
+                              {life}
+                            </td>
+                            <td
+                              className="max-w-[140px] truncate px-3 py-2.5"
+                              title={h.address || undefined}
+                            >
+                              {dash(h.address)}
+                            </td>
+                            <td className="max-w-[100px] truncate px-3 py-2.5">
+                              {dash(h.spouse)}
+                            </td>
+                            <td
+                              className="max-w-[100px] truncate px-3 py-2.5 text-muted"
+                              title={h.alias || undefined}
+                            >
+                              {dash(h.alias)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </TableScroll>
+
+              {selected ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-soft px-3 py-2 text-sm">
+                  <span className="text-muted">
+                    已选：
+                    <span className="font-medium text-ink">
+                      {selected.name}
+                    </span>
+                    {selected.level != null
+                      ? ` · 第${selected.level}世`
+                      : ""}
+                    {selected.parentName
+                      ? ` · 父 ${selected.parentName}`
+                      : ""}
+                  </span>
+                  <Button
+                    disabled={loading}
+                    onClick={() => void runQuery()}
+                  >
+                    {loading ? "生成中…" : "用此人生成出版"}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : !queried && !data ? (
             <div className="grid gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:items-center">
               <div
                 className="mx-auto aspect-[3/4] w-full max-w-[200px] rounded-lg border border-[#e2d4bf] p-3 shadow-card"
@@ -516,7 +827,7 @@ export default function PublishPage() {
                       按人物查询
                     </span>
                     <span className="text-muted">
-                      输入姓名列出全部同名，选定一人后设置向上 / 向下代数
+                      输入姓名后在右侧表格筛选同名，选定后再设向上 / 向下代数
                     </span>
                   </li>
                   <li className="flex gap-2">
