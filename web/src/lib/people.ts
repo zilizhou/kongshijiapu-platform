@@ -1881,10 +1881,12 @@ async function loadPendingCreates(
 type FlatNode = PeopleRow & { left: number; right: number };
 
 /**
- * 世系图向下拉取的最大行数。
- * 库内单人直接子代最多约 223；下延 6 代时最大子树约 5500+。
+ * 世系图节点预算：超过则截断，避免宽谱把整支派拉爆。
+ * nested-set 单次拉取上限（仅用于区间较小的根）。
  */
-const LINEAGE_DESCENDANT_ROW_LIMIT = 8000;
+const LINEAGE_NODE_BUDGET = 400;
+const LINEAGE_NESTED_SPAN_MAX = 4000;
+const LINEAGE_DESCENDANT_ROW_LIMIT = 2000;
 
 function buildTreeFromFlat(
   rootId: number,
@@ -1894,10 +1896,12 @@ function buildTreeFromFlat(
   const sorted = [...flat].sort((a, b) => a.left - b.left);
   const nodes = new Map<number, LineageNode>();
   const childrenOf = new Map<number, number[]>();
+  const byId = new Map<number, FlatNode>();
   const stack: FlatNode[] = [];
 
   for (const item of sorted) {
     nodes.set(item.id, toLineageNode(item));
+    byId.set(item.id, item);
     while (stack.length && stack[stack.length - 1].right < item.left) {
       stack.pop();
     }
@@ -1926,7 +1930,7 @@ function buildTreeFromFlat(
     }
     const kidIds = childrenOf.get(nid) || [];
     const kidRows = kidIds
-      .map((cid) => flat.find((f) => f.id === cid))
+      .map((cid) => byId.get(cid))
       .filter(Boolean) as FlatNode[];
     const ordered = sortByBirthOrder(kidRows);
     node.children = ordered.map((k, idx) => {
@@ -1950,43 +1954,141 @@ function collectLineageIds(node: LineageNode, into: Set<number>) {
   for (const c of node.children) collectLineageIds(c, into);
 }
 
-/** 按父子关系递归展开（nested-set 不可用或未覆盖中心人时的后备） */
-async function buildWideTreeByChildren(
-  person: PeopleRow,
-  maxLevel: number,
-  relatedIds: Set<number>,
-  depthLeft: number,
-  cache: Map<number, LineageNode>,
-): Promise<LineageNode> {
-  if (cache.has(person.id)) return cache.get(person.id)!;
-  const node = toLineageNode(person);
-  relatedIds.add(person.id);
-  cache.set(person.id, node);
-  const lv = Number(person.level ?? 0);
-  if (depthLeft <= 0 || lv >= maxLevel) {
-    node.children = [];
-    return node;
+function findLineageNode(
+  node: LineageNode,
+  id: number,
+): LineageNode | null {
+  if (node.id === id) return node;
+  for (const c of node.children) {
+    const hit = findLineageNode(c, id);
+    if (hit) return hit;
   }
-  const kids = await getChildren(person.id);
-  const next: LineageNode[] = [];
-  for (let idx = 0; idx < kids.length; idx++) {
-    const k = kids[idx];
-    if (Number(k.level ?? lv + 1) > maxLevel) continue;
-    const child = await buildWideTreeByChildren(
-      k,
-      maxLevel,
-      relatedIds,
-      depthLeft - 1,
-      cache,
-    );
-    child.rank = k.rank || rankLabelTraditional(k.sex, idx);
-    next.push(child);
-  }
-  node.children = next;
-  return node;
+  return null;
 }
 
-async function fetchLineageFlatUnderRoot(
+/** 轻量世系字段（不联 info，避免宽表扫描） */
+const LINEAGE_LITE_SELECT = `p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
+            p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
+            p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT, p.F_EDIT_TIME,
+            NULL AS F_SPOUSE, NULL AS F_SPOUSE_INFO, NULL AS F_DESCRIPTION, NULL AS F_VOLUME,
+            NULL AS F_PHONE, NULL AS F_COMPANY, NULL AS F_POSITION,
+            NULL AS F_PROFESSIONAL_TITLE, NULL AS F_COLLEGE, NULL AS F_DEGREE,
+            0 AS child_count`;
+
+/** 批量按父节点取子代（relation + sibling_order），每父最多 80 人 */
+async function batchChildrenByParents(
+  parentIds: number[],
+  maxLevel: number,
+): Promise<Map<number, PeopleRow[]>> {
+  const map = new Map<number, PeopleRow[]>();
+  const ids = [...new Set(parentIds.filter((x) => x > 0))];
+  if (!ids.length) return map;
+  for (const id of ids) map.set(id, []);
+
+  const hasRelation = await tableExists("tb_people_relation");
+  await ensureSiblingOrderTable();
+  const ph = ids.map((_, i) => `:p${i}`).join(",");
+  const params: Record<string, unknown> = { maxLevel };
+  ids.forEach((id, i) => {
+    params[`p${i}`] = id;
+  });
+
+  if (hasRelation) {
+    const rows = await query<PeopleDb[]>(
+      `SELECT ${LINEAGE_LITE_SELECT},
+              r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID
+       FROM tb_people_relation r
+       JOIN tb_people p ON p.F_ID = r.F_PEOPLE_ID
+       WHERE r.F_PARENT_ID IN (${ph})
+         AND (p.F_LEVEL IS NULL OR p.F_LEVEL <= :maxLevel)
+       ORDER BY r.F_PARENT_ID ASC, p.F_LEFT ASC, p.F_ID ASC
+       LIMIT 2000`,
+      params,
+    );
+    for (const r of rows) {
+      const pid = Number(r.F_PARENT_ID);
+      const arr = map.get(pid);
+      if (!arr || arr.length >= 80) continue;
+      arr.push(mapRow(r));
+    }
+  }
+
+  const soRows = await query<PeopleDb[]>(
+    `SELECT ${LINEAGE_LITE_SELECT},
+            s.parent_id AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID
+     FROM app_sibling_order s
+     JOIN tb_people p ON p.F_ID = s.people_id
+     WHERE s.parent_id IN (${ph})
+       AND (p.F_LEVEL IS NULL OR p.F_LEVEL <= :maxLevel)
+     ORDER BY s.parent_id ASC, s.sort_no ASC, p.F_ID ASC
+     LIMIT 500`,
+    params,
+  );
+  for (const r of soRows) {
+    const pid = Number(r.F_PARENT_ID);
+    const arr = map.get(pid);
+    if (!arr || arr.length >= 80) continue;
+    const kid = mapRow(r);
+    if (arr.some((x) => x.id === kid.id)) continue;
+    arr.push(kid);
+  }
+
+  for (const [pid, arr] of map) {
+    map.set(pid, sortByBirthOrder(arr));
+  }
+  return map;
+}
+
+/**
+ * 按关系表 BFS 建宽谱：每层一次批量查询，有节点预算，避免递归 N+1。
+ */
+async function buildWideTreeBatched(
+  root: PeopleRow,
+  maxLevel: number,
+  relatedIds: Set<number>,
+): Promise<LineageNode> {
+  const rootNode = toLineageNode(root);
+  relatedIds.add(root.id);
+  const nodeMap = new Map<number, LineageNode>([[root.id, rootNode]]);
+  let frontier = [root.id];
+  let total = 1;
+
+  while (frontier.length && total < LINEAGE_NODE_BUDGET) {
+    const parents = frontier.filter((id) => {
+      const n = nodeMap.get(id);
+      return n && Number(n.level ?? 0) < maxLevel;
+    });
+    frontier = [];
+    if (!parents.length) break;
+
+    const kidsMap = await batchChildrenByParents(parents, maxLevel);
+    for (const pid of parents) {
+      const parentNode = nodeMap.get(pid);
+      if (!parentNode) continue;
+      const kids = kidsMap.get(pid) || [];
+      parentNode.children = [];
+      for (let idx = 0; idx < kids.length; idx++) {
+        if (total >= LINEAGE_NODE_BUDGET) break;
+        const k = kids[idx];
+        if (Number(k.level ?? 0) > maxLevel) continue;
+        relatedIds.add(k.id);
+        let child = nodeMap.get(k.id);
+        if (!child) {
+          child = toLineageNode(k);
+          nodeMap.set(k.id, child);
+          total += 1;
+          if (Number(k.level ?? 0) < maxLevel) frontier.push(k.id);
+        }
+        child.rank = k.rank || rankLabelTraditional(k.sex, idx);
+        parentNode.children.push(child);
+      }
+    }
+  }
+  return rootNode;
+}
+
+/** nested-set 轻量拉取：无 info 联表；区间过大则跳过 */
+async function fetchLineageFlatLite(
   rootId: number,
   maxLevel: number,
 ): Promise<{
@@ -2007,25 +2109,19 @@ async function fetchLineageFlatUnderRoot(
     lv: Number(b.lv || 0),
     flag: Number(b.flag || 0),
   };
-  if (!(bounds.r > bounds.l)) return { bounds, flat: [] };
+  const span = bounds.r - bounds.l;
+  // 占位区间或整支过大：改走关系表 BFS
+  if (span <= 1 || span > LINEAGE_NESTED_SPAN_MAX) {
+    return { bounds, flat: [] };
+  }
 
   const hasRelation = await tableExists("tb_people_relation");
-  const hasInfo = await tableExists("tb_people_info");
   const rows = await query<(PeopleDb & { _left: number; _right: number })[]>(
-    `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
-            p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
-            p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT, p.F_EDIT_TIME,
+    `SELECT ${LINEAGE_LITE_SELECT},
             p.F_LEFT AS _left, p.F_RIGHT AS _right,
-            ${hasRelation ? "r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID" : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID"},
-            ${
-              hasInfo
-                ? "i.F_SPOUSE, i.F_SPOUSE_INFO, i.F_DESCRIPTION, i.F_VOLUME, i.F_PHONE, i.F_COMPANY, i.F_POSITION, i.F_PROFESSIONAL_TITLE, i.F_COLLEGE, i.F_DEGREE"
-                : "NULL AS F_SPOUSE, NULL AS F_SPOUSE_INFO, NULL AS F_DESCRIPTION, NULL AS F_VOLUME, NULL AS F_PHONE, NULL AS F_COMPANY, NULL AS F_POSITION, NULL AS F_PROFESSIONAL_TITLE, NULL AS F_COLLEGE, NULL AS F_DEGREE"
-            },
-            0 AS child_count
+            ${hasRelation ? "r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID" : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID"}
      FROM tb_people p
      ${hasRelation ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID" : ""}
-     ${hasInfo ? "LEFT JOIN tb_people_info i ON i.F_PEOPLE_ID = p.F_ID" : ""}
      WHERE p.F_FLAG = :flag
        AND p.F_LEFT >= :l AND p.F_RIGHT <= :r
        AND p.F_LEVEL <= :maxLevel
@@ -2033,61 +2129,17 @@ async function fetchLineageFlatUnderRoot(
      LIMIT ${LINEAGE_DESCENDANT_ROW_LIMIT}`,
     { l: bounds.l, r: bounds.r, maxLevel, flag: bounds.flag },
   );
-  const mappedRows = await attachSiblingMeta(rows.map(mapRow));
-  const flat: FlatNode[] = mappedRows.map((mapped, i) => ({
-    ...mapped,
-    left: Number(rows[i]._left),
-    right: Number(rows[i]._right),
+  const flat: FlatNode[] = rows.map((r) => ({
+    ...mapRow(r),
+    left: Number(r._left),
+    right: Number(r._right),
   }));
   return { bounds, flat };
 }
 
 /**
- * 沿直系路径补全各父节点下的同父兄弟（含平台新增挂靠），
- * 并为其旁系分支拉取至 maxLevel 的子树。
- */
-async function ensurePathSiblingBranches(
-  tree: LineageNode,
-  pathParentIds: number[],
-  maxLevel: number,
-  relatedIds: Set<number>,
-) {
-  for (const parentId of pathParentIds) {
-    if (!lineageTreeHasId(tree, parentId)) continue;
-    const kids = await getChildren(parentId);
-    for (let idx = 0; idx < kids.length; idx++) {
-      const k = kids[idx];
-      if (Number(k.level ?? 0) > maxLevel) continue;
-      if (lineageTreeHasId(tree, k.id)) continue;
-      relatedIds.add(k.id);
-      let branch: LineageNode;
-      const { flat } = await fetchLineageFlatUnderRoot(k.id, maxLevel);
-      if (flat.some((f) => f.id === k.id)) {
-        const rootLv = Number(k.level ?? 0);
-        branch = buildTreeFromFlat(
-          k.id,
-          flat,
-          Math.max(0, maxLevel - rootLv),
-        );
-        collectLineageIds(branch, relatedIds);
-      } else {
-        branch = await buildWideTreeByChildren(
-          k,
-          maxLevel,
-          relatedIds,
-          Math.max(0, maxLevel - Number(k.level ?? 0)),
-          new Map(),
-        );
-      }
-      branch.rank = k.rank || rankLabelTraditional(k.sex, idx);
-      walkInjectChild(tree, parentId, branch);
-    }
-  }
-}
-
-/**
  * 宽谱世系：以上溯最远祖先为根，展开各代同父兄弟及其子嗣，
- * 下延至「中心人物世代 + down」。
+ * 下延至「中心人物世代 + down」。按层批量查，有节点预算。
  */
 export async function getLineageTree(
   id: number,
@@ -2117,39 +2169,64 @@ export async function getLineageTree(
 
   const needTree = ancestors.length > 0 || down > 0;
   if (needTree) {
-    const { flat } = await fetchLineageFlatUnderRoot(rootPerson.id, maxLevel);
-    for (const f of flat) relatedIds.add(f.id);
-
-    if (
+    const { flat } = await fetchLineageFlatLite(rootPerson.id, maxLevel);
+    const flatOk =
+      flat.length > 0 &&
       flat.some((f) => f.id === rootPerson.id) &&
-      (rootPerson.id === focus.id || flat.some((f) => f.id === focus.id))
-    ) {
+      (rootPerson.id === focus.id || flat.some((f) => f.id === focus.id));
+
+    if (flatOk) {
+      for (const f of flat) relatedIds.add(f.id);
       tree = buildTreeFromFlat(rootPerson.id, flat, depthSpan);
     } else {
-      tree = await buildWideTreeByChildren(
-        rootPerson,
-        maxLevel,
-        relatedIds,
-        depthSpan,
-        new Map(),
-      );
+      // nested-set 不可用 / 未覆盖中心人（常见于平台新录）：关系表分层 BFS
+      tree = await buildWideTreeBatched(rootPerson, maxLevel, relatedIds);
     }
 
-    // 直系路径上各父节点：补全同父兄弟（nested-set 漏网 / 平台挂靠）
+    // 补全直系路径上尚未挂上的同父兄弟（平台挂靠）
     const pathParentIds = [
       ...ancestors.map((a) => a.id),
-      ...(focus.parentId && lineageTreeHasId(tree, focus.parentId)
-        ? [focus.parentId]
-        : []),
+      ...(focus.parentId ? [focus.parentId] : []),
     ];
-    // 中心人自身也作为父，以便下延旁系已覆盖时再补平台子嗣
     if (down > 0) pathParentIds.push(focus.id);
-    await ensurePathSiblingBranches(
-      tree,
-      [...new Set(pathParentIds)],
-      maxLevel,
-      relatedIds,
+    const uniqParents = [...new Set(pathParentIds)].filter((pid) =>
+      lineageTreeHasId(tree, pid),
     );
+    if (uniqParents.length) {
+      const kidsMap = await batchChildrenByParents(uniqParents, maxLevel);
+      const missingIds: number[] = [];
+      for (const pid of uniqParents) {
+        const parentNode = findLineageNode(tree, pid);
+        if (!parentNode) continue;
+        const have = new Set(parentNode.children.map((c) => c.id));
+        const kids = kidsMap.get(pid) || [];
+        kids.forEach((k, idx) => {
+          if (have.has(k.id) || Number(k.level ?? 0) > maxLevel) return;
+          if (relatedIds.size >= LINEAGE_NODE_BUDGET) return;
+          const leaf = toLineageNode(k);
+          leaf.rank = k.rank || rankLabelTraditional(k.sex, idx);
+          parentNode.children.push(leaf);
+          relatedIds.add(k.id);
+          have.add(k.id);
+          if (Number(k.level ?? 0) < maxLevel) missingIds.push(k.id);
+        });
+      }
+      // 旁系再向下扩一层
+      if (missingIds.length && relatedIds.size < LINEAGE_NODE_BUDGET) {
+        const subKids = await batchChildrenByParents(missingIds, maxLevel);
+        for (const mid of missingIds) {
+          const host = findLineageNode(tree, mid);
+          if (!host || host.children.length) continue;
+          const kids = subKids.get(mid) || [];
+          host.children = kids.slice(0, 40).map((k, idx) => {
+            relatedIds.add(k.id);
+            const n = toLineageNode(k);
+            n.rank = k.rank || rankLabelTraditional(k.sex, idx);
+            return n;
+          });
+        }
+      }
+    }
   }
 
   collectLineageIds(tree, relatedIds);
