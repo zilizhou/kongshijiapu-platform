@@ -49,6 +49,14 @@ export function PersonNodeDrawer({
   const [error, setError] = useState("");
   const [savedId, setSavedId] = useState<number | null>(null);
 
+  /** 仅暂存/驳回可直接 PATCH 原单；待审中走 POST 合并或去编修页撤回 */
+  const resumableRequestId =
+    person?.reviewRequestId &&
+    person.reviewStatus &&
+    ["draft", "rejected"].includes(person.reviewStatus)
+      ? person.reviewRequestId
+      : null;
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -92,16 +100,23 @@ export function PersonNodeDrawer({
     setSaving(true);
     setError("");
     try {
-      const res = await fetch("/api/requests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operation: "update",
-          objectId: person.id,
-          payload,
-          submit,
-        }),
-      });
+      // 已有驳回/暂存单：直接 PATCH 原单，避免另开一张对不上
+      const res = resumableRequestId
+        ? await fetch(`/api/requests/${resumableRequestId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ payload, submit }),
+          })
+        : await fetch("/api/requests", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              operation: "update",
+              objectId: person.id,
+              payload,
+              submit,
+            }),
+          });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存失败");
       setSavedId(data.item.id);

@@ -601,7 +601,7 @@ export async function previewDaikaoAdmit(
 /** 校验是否可发起入谱；返回当前行 */
 export async function assertDaikaoAdmittable(id: number): Promise<DaikaoRow> {
   await ensureDaikaoAdmitColumns();
-  const row = await getDaikaoById(id);
+  let row = await getDaikaoById(id);
   if (!row) throw new Error("待考成员不存在");
   if (row.admitStatus === "admitted") {
     throw new Error(
@@ -609,8 +609,29 @@ export async function assertDaikaoAdmittable(id: number): Promise<DaikaoRow> {
     );
   }
   if (row.admitStatus === "pending" && row.admitRequestId) {
+    // 关联变更单已驳回/暂存/删除时，清掉卡住的 pending，允许继续改后重提
+    const reqRows = await query<RowDataPacket[]>(
+      `SELECT id, status FROM app_change_requests WHERE id = :id LIMIT 1`,
+      { id: row.admitRequestId },
+    );
+    const reqStatus = reqRows[0] ? String(reqRows[0].status || "") : "";
+    const stale =
+      !reqRows[0] ||
+      reqStatus === "rejected" ||
+      reqStatus === "draft" ||
+      reqStatus === "approved";
+    if (stale) {
+      await clearDaikaoAdmitPending(id, row.admitRequestId);
+      row = (await getDaikaoById(id)) || row;
+    } else {
+      throw new Error(
+        `入谱申请审核中（变更单 #${row.admitRequestId}），请到「我的编修」打开该单修改后重新提交`,
+      );
+    }
+  }
+  if (row.admitStatus === "pending" && row.admitRequestId) {
     throw new Error(
-      `入谱申请审核中（变更单 #${row.admitRequestId}），请勿重复申请`,
+      `入谱申请审核中（变更单 #${row.admitRequestId}），请到「我的编修」打开该单修改后重新提交`,
     );
   }
   return row;

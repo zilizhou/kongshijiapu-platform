@@ -74,6 +74,18 @@ function NewEditInner() {
       .then((d) => {
         if (!d.person) return;
         const p = d.person as PeopleRow;
+        // 修改且已有暂存/驳回/待审单：回到原单，驳回后可直接改后重提
+        if (
+          op === "update" &&
+          p.reviewRequestId &&
+          p.reviewStatus &&
+          ["draft", "rejected", "pending_1", "pending_2", "pending_final"].includes(
+            p.reviewStatus,
+          )
+        ) {
+          router.replace(`/edit/${p.reviewRequestId}`);
+          return;
+        }
         setObjectId(p.id);
         if (op === "create") {
           setPayload({
@@ -88,7 +100,7 @@ function NewEditInner() {
         }
       })
       .finally(() => setLoading(false));
-  }, [fromId, op, daikaoId]);
+  }, [fromId, op, daikaoId, router]);
 
   async function save(submit: boolean) {
     if (!payload.name.trim()) {

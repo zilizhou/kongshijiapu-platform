@@ -170,9 +170,13 @@ export default function EditDetailPage() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      {item.rejectReason ? (
+      {item.status === "rejected" && item.rejectReason ? (
         <Card className="mb-4 border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
-          驳回原因：{item.rejectReason}
+          <div className="font-medium">已驳回，请按意见修改后重新提交</div>
+          <div className="mt-1">驳回原因：{item.rejectReason}</div>
+          <div className="mt-2 text-xs text-rose-700/90">
+            修改下方信息后点击「确认提交」，将重新进入一审。
+          </div>
         </Card>
       ) : null}
 

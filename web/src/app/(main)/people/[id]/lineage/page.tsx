@@ -236,7 +236,7 @@ function TreeBranch({
       {kids.length ? (
         <>
           <div className="my-2 h-5 w-px bg-line" />
-          <div className="flex flex-wrap justify-center gap-4 border-t border-line pt-3">
+          <div className="flex flex-nowrap items-start justify-center gap-4 border-t border-line pt-3">
             {kids.map((c, idx) => {
               const draggable = canDrag && !c.pending;
               return (
@@ -414,7 +414,7 @@ function LineageInner() {
         seed.groupName = a.groupName || data.focus.groupName;
         return seed;
       }
-      // 在子树中查找：父节点即当前遍历节点
+      // 在统一宽谱树中查找：父节点即当前遍历节点
       const walk = (node: LineageNode, parentId: number | null): boolean => {
         if (node.id === id) {
           seed.sex = node.sex;
@@ -428,7 +428,13 @@ function LineageInner() {
         }
         return false;
       };
-      if (data.tree) walk(data.tree, data.focus.parentId);
+      if (data.tree) {
+        const rootParent =
+          data.ancestors.length > 0
+            ? data.ancestors[0].parentId ?? null
+            : data.focus.parentId;
+        walk(data.tree, rootParent);
+      }
       if (seed.groupName == null) seed.groupName = data.focus.groupName;
       return seed;
     },
@@ -484,8 +490,8 @@ function LineageInner() {
         title="世系图"
         desc={
           data
-            ? `以「${data.focus.name}」为中心，上溯 ${data.up} 代、下延 ${data.down} 代`
-            : "树形展示祖先与子嗣关系"
+            ? `以「${data.focus.name}」为中心，上溯 ${data.up} 代、下延 ${data.down} 代（含各代兄弟分支）`
+            : "宽谱树形展示祖先、同辈兄弟及其子嗣"
         }
         actions={
           <div className="flex flex-wrap gap-2">
@@ -557,43 +563,11 @@ function LineageInner() {
       {data && !loading ? (
         <Card className="overflow-hidden p-0">
           <TableScroll className="p-6">
-          <div className="mb-6 flex flex-col items-center gap-2">
-            <div className="text-xs text-muted">祖先链（由远及近）</div>
-            {data.ancestors.length || (data.pendingParents || []).some((p) => p.asParentOf === data.focus.id) ? (
-              <>
-                {data.ancestors.map((a) => (
-                  <div key={a.id} className="flex flex-col items-center">
-                    {(data.pendingParents || [])
-                      .filter((p) => p.asParentOf === a.id)
-                      .map((p) => (
-                        <div key={p.node.id} className="flex flex-col items-center">
-                          <PersonCard
-                            p={p.node}
-                            focusId={data.focus.id}
-                            reviewingIds={reviewingIds}
-                            canEdit={canEdit}
-                            onOpen={setDrawerId}
-                            onOpenPending={openPending}
-                            onContextMenu={onNodeContextMenu}
-                          />
-                          <div className="my-1 h-4 w-px bg-line" />
-                        </div>
-                      ))}
-                    <PersonCard
-                      p={a}
-                      focusId={data.focus.id}
-                      reviewingIds={reviewingIds}
-                      canEdit={canEdit}
-                      onOpen={setDrawerId}
-                      onOpenPending={openPending}
-                      onContextMenu={onNodeContextMenu}
-                    />
-                    <div className="my-1 h-4 w-px bg-line" />
-                  </div>
-                ))}
-                {(data.pendingParents || [])
-                  .filter((p) => p.asParentOf === data.focus.id)
-                  .map((p) => (
+            {(data.pendingParents || []).length ? (
+              <div className="mb-4 flex flex-col items-center gap-2">
+                <div className="text-xs text-muted">待审父辈（尚未入库）</div>
+                <div className="flex flex-wrap justify-center gap-3">
+                  {(data.pendingParents || []).map((p) => (
                     <div key={p.node.id} className="flex flex-col items-center">
                       <PersonCard
                         p={p.node}
@@ -604,59 +578,57 @@ function LineageInner() {
                         onOpenPending={openPending}
                         onContextMenu={onNodeContextMenu}
                       />
-                      <div className="my-1 h-4 w-px bg-line" />
+                      <div className="mt-1 text-[10px] text-muted">
+                        挂于 #{p.asParentOf} 之上
+                      </div>
                     </div>
                   ))}
-              </>
-            ) : (
-              <div className="text-sm text-muted">
-                {queryUp === 0 ? "未查询祖先" : "暂无更早祖先记录"}
+                </div>
               </div>
-            )}
-          </div>
+            ) : null}
 
-          <div className="flex justify-center border-t border-dashed border-line pt-6">
-            <div className="flex flex-wrap items-start justify-center gap-4">
-              {(data.pendingSiblings || []).map((s) => (
-                <PersonCard
-                  key={s.id}
-                  p={s}
-                  focusId={data.focus.id}
-                  reviewingIds={reviewingIds}
-                  canEdit={canEdit}
-                  onOpen={setDrawerId}
-                  onOpenPending={openPending}
-                  onContextMenu={onNodeContextMenu}
-                />
-              ))}
-              {data.tree ? (
-                <TreeBranch
-                  node={data.tree}
-                  focusId={data.focus.id}
-                  reviewingIds={reviewingIds}
-                  canEdit={canEdit}
-                  onOpen={setDrawerId}
-                  onOpenPending={openPending}
-                  onContextMenu={onNodeContextMenu}
-                  onReorderChildren={onReorderChildren}
-                />
-              ) : (
-                <PersonCard
-                  p={data.focus}
-                  focusId={data.focus.id}
-                  reviewingIds={reviewingIds}
-                  canEdit={canEdit}
-                  onOpen={setDrawerId}
-                  onOpenPending={openPending}
-                  onContextMenu={onNodeContextMenu}
-                />
-              )}
+            <div className="flex min-w-min justify-center">
+              <div className="flex flex-nowrap items-start justify-center gap-4">
+                {(data.pendingSiblings || []).map((s) => (
+                  <PersonCard
+                    key={s.id}
+                    p={s}
+                    focusId={data.focus.id}
+                    reviewingIds={reviewingIds}
+                    canEdit={canEdit}
+                    onOpen={setDrawerId}
+                    onOpenPending={openPending}
+                    onContextMenu={onNodeContextMenu}
+                  />
+                ))}
+                {data.tree ? (
+                  <TreeBranch
+                    node={data.tree}
+                    focusId={data.focus.id}
+                    reviewingIds={reviewingIds}
+                    canEdit={canEdit}
+                    onOpen={setDrawerId}
+                    onOpenPending={openPending}
+                    onContextMenu={onNodeContextMenu}
+                    onReorderChildren={onReorderChildren}
+                  />
+                ) : (
+                  <PersonCard
+                    p={data.focus}
+                    focusId={data.focus.id}
+                    reviewingIds={reviewingIds}
+                    canEdit={canEdit}
+                    onOpen={setDrawerId}
+                    onOpenPending={openPending}
+                    onContextMenu={onNodeContextMenu}
+                  />
+                )}
+              </div>
             </div>
-          </div>
 
-          <div className="mt-8 text-center text-xs text-muted">
-            点击人物卡片查看详情 · 青绿虚线为待审新增 · 同层子代全部展示（可横向滚动）
-          </div>
+            <div className="mt-8 text-center text-xs text-muted">
+              宽谱展示：各代同父兄弟及其分支一并画出 · 可横向滚动 · 金色为当前人物
+            </div>
           </TableScroll>
         </Card>
       ) : null}

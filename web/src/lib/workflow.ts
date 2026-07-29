@@ -189,93 +189,90 @@ export async function createRequest(opts: {
     }
   }
 
-  // 同一对象 + 同操作：未完结单合并为一条
-  if (opts.objectId && opts.operation !== "create") {
-    const openRows = await query<RowDataPacket[]>(
-      `SELECT id, status FROM app_change_requests
-       WHERE object_type = :objectType
-         AND object_id = :objectId
-         AND operation = :operation
-         AND status IN ('draft', 'pending_1', 'pending_2', 'pending_final', 'rejected')
-       ORDER BY id DESC`,
-      {
-        objectType,
-        objectId: opts.objectId,
-        operation: opts.operation,
-      },
-    );
-    if (openRows.length) {
-      const keepId = Number(openRows[0].id);
-      const prevStatus = String(openRows[0].status) as RequestStatus;
-      for (const row of openRows.slice(1)) {
-        const oldId = Number(row.id);
-        await execute(
-          `UPDATE app_change_requests SET
-             status = 'rejected',
-             reject_reason = :reason,
-             last_actor_id = :actorId,
-             last_actor_name = :actorName
-           WHERE id = :id`,
-          {
-            id: oldId,
-            reason: `已被变更单 #${keepId} 替代（同一成员重复提交）`,
-            actorId: opts.user.id,
-            actorName: opts.user.displayName,
-          },
-        );
-        await addEvent(
-          oldId,
-          opts.user,
-          "supersede",
-          `合并至 #${keepId}`,
-        );
-      }
-
-      let status: RequestStatus;
-      if (opts.submit) {
-        status = "pending_1";
-      } else if (
-        prevStatus === "pending_1" ||
-        prevStatus === "pending_2" ||
-        prevStatus === "pending_final"
-      ) {
-        status = prevStatus;
-      } else {
-        status = "draft";
-      }
-
+  // 未完结单合并：update/delete 按 objectId；create 按待考来源或同名同父暂存/驳回单
+  const openRows = await findOpenRequestsToMerge({
+    objectType,
+    operation: opts.operation,
+    objectId: opts.objectId ?? null,
+    payload,
+    userId: opts.user.id,
+  });
+  if (openRows.length) {
+    const keepId = Number(openRows[0].id);
+    const prevStatus = String(openRows[0].status) as RequestStatus;
+    for (const row of openRows.slice(1)) {
+      const oldId = Number(row.id);
       await execute(
         `UPDATE app_change_requests SET
-           payload = CAST(:payload AS JSON),
-           before_snapshot = CAST(:beforeSnapshot AS JSON),
-           status = :status,
-           reject_reason = NULL,
-           submitted_at = CASE
-             WHEN :submit = 1 THEN NOW()
-             ELSE submitted_at
-           END,
+           status = 'rejected',
+           reject_reason = :reason,
            last_actor_id = :actorId,
            last_actor_name = :actorName
          WHERE id = :id`,
         {
-          id: keepId,
-          payload: JSON.stringify(payload),
-          beforeSnapshot: before ? JSON.stringify(before) : null,
-          status,
-          submit: opts.submit ? 1 : 0,
+          id: oldId,
+          reason: `已被变更单 #${keepId} 替代（同一成员重复提交）`,
           actorId: opts.user.id,
           actorName: opts.user.displayName,
         },
       );
-      await addEvent(
-        keepId,
-        opts.user,
-        opts.submit ? "submit" : "save",
-        openRows.length > 1 ? `合并 ${openRows.length} 条待审单` : undefined,
-      );
-      clearYiziCache();
-      return getRequestById(keepId);
+      await addEvent(oldId, opts.user, "supersede", `合并至 #${keepId}`);
     }
+
+    let status: RequestStatus;
+    if (opts.submit) {
+      status = "pending_1";
+    } else if (
+      prevStatus === "pending_1" ||
+      prevStatus === "pending_2" ||
+      prevStatus === "pending_final"
+    ) {
+      status = prevStatus;
+    } else {
+      // draft / rejected → 暂存
+      status = "draft";
+    }
+
+    const submittedAtSql = opts.submit ? "NOW()" : "submitted_at";
+    await execute(
+      `UPDATE app_change_requests SET
+         payload = CAST(:payload AS JSON),
+         before_snapshot = CAST(:beforeSnapshot AS JSON),
+         status = :status,
+         reject_reason = NULL,
+         submitted_at = ${submittedAtSql},
+         last_actor_id = :actorId,
+         last_actor_name = :actorName
+       WHERE id = :id`,
+      {
+        id: keepId,
+        payload: JSON.stringify(payload),
+        beforeSnapshot: before ? JSON.stringify(before) : null,
+        status,
+        actorId: opts.user.id,
+        actorName: opts.user.displayName,
+      },
+    );
+    await addEvent(
+      keepId,
+      opts.user,
+      opts.submit ? "submit" : "save",
+      openRows.length > 1
+        ? `合并 ${openRows.length} 条待审单`
+        : prevStatus === "rejected"
+          ? "驳回后重新提交"
+          : undefined,
+    );
+    const sourceDaikaoIdMerged = getSourceDaikaoId(payload);
+    if (
+      objectType === "people" &&
+      opts.operation === "create" &&
+      sourceDaikaoIdMerged
+    ) {
+      await markDaikaoAdmitPending(sourceDaikaoIdMerged, keepId);
+    }
+    clearYiziCache();
+    return getRequestById(keepId);
   }
 
   const status: RequestStatus = opts.submit ? "pending_1" : "draft";
@@ -317,6 +314,83 @@ export async function createRequest(opts: {
   return getRequestById(id);
 }
 
+/** 查找可合并的未完结变更单（含已驳回，便于改后重提） */
+async function findOpenRequestsToMerge(opts: {
+  objectType: ObjectType;
+  operation: Operation;
+  objectId: number | null;
+  payload: ChangePayload;
+  userId: string;
+}): Promise<RowDataPacket[]> {
+  if (opts.objectId && opts.operation !== "create") {
+    return query<RowDataPacket[]>(
+      `SELECT id, status FROM app_change_requests
+       WHERE object_type = :objectType
+         AND object_id = :objectId
+         AND operation = :operation
+         AND status IN ('draft', 'pending_1', 'pending_2', 'pending_final', 'rejected')
+       ORDER BY id DESC`,
+      {
+        objectType: opts.objectType,
+        objectId: opts.objectId,
+        operation: opts.operation,
+      },
+    );
+  }
+
+  if (opts.objectType !== "people" || opts.operation !== "create") {
+    return [];
+  }
+
+  const sourceDaikaoId = getSourceDaikaoId(opts.payload);
+  if (sourceDaikaoId) {
+    return query<RowDataPacket[]>(
+      `SELECT id, status FROM app_change_requests
+       WHERE object_type = 'people'
+         AND operation = 'create'
+         AND submitter_id = :userId
+         AND status IN ('draft', 'rejected')
+         AND CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.sourceDaikaoId')) AS UNSIGNED) = :daikaoId
+       ORDER BY id DESC`,
+      { userId: opts.userId, daikaoId: sourceDaikaoId },
+    );
+  }
+
+  const p = opts.payload as PeoplePayload;
+  const name = (p.name || "").trim();
+  if (!name) return [];
+  const parentId = p.parentId ? Number(p.parentId) : 0;
+  if (parentId > 0) {
+    return query<RowDataPacket[]>(
+      `SELECT id, status FROM app_change_requests
+       WHERE object_type = 'people'
+         AND operation = 'create'
+         AND submitter_id = :userId
+         AND status IN ('draft', 'rejected')
+         AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.name')) = :name
+         AND CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.parentId')) AS UNSIGNED) = :parentId
+       ORDER BY id DESC
+       LIMIT 5`,
+      { userId: opts.userId, name, parentId },
+    );
+  }
+  return query<RowDataPacket[]>(
+    `SELECT id, status FROM app_change_requests
+     WHERE object_type = 'people'
+       AND operation = 'create'
+       AND submitter_id = :userId
+       AND status IN ('draft', 'rejected')
+       AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.name')) = :name
+       AND (
+         JSON_EXTRACT(payload, '$.parentId') IS NULL
+         OR JSON_UNQUOTE(JSON_EXTRACT(payload, '$.parentId')) IN ('', 'null', '0')
+       )
+     ORDER BY id DESC
+     LIMIT 5`,
+    { userId: opts.userId, name },
+  );
+}
+
 export async function updateRequestDraft(
   id: number,
   user: SessionUser,
@@ -329,32 +403,49 @@ export async function updateRequestDraft(
     throw new Error("只能编辑自己的变更单");
   }
   if (!["draft", "rejected"].includes(req.status)) {
-    throw new Error("当前状态不可编辑");
+    throw new Error("当前状态不可编辑，请确认单据为「暂存」或「已驳回」");
   }
 
   const trad = normalizePayload(req.objectType, payload);
-  const status: RequestStatus = submit ? "pending_1" : req.status === "rejected" ? "draft" : req.status;
+  // 驳回后暂存→draft；确认提交→pending_1；并清空驳回原因以便重审
+  const status: RequestStatus = submit
+    ? "pending_1"
+    : req.status === "rejected"
+      ? "draft"
+      : req.status;
+  const submittedAtSql = submit ? "NOW()" : "submitted_at";
   await execute(
     `UPDATE app_change_requests SET
       payload = CAST(:payload AS JSON),
       status = :status,
-      reject_reason = CASE WHEN :submit = 1 THEN NULL ELSE reject_reason END,
-      submitted_at = CASE WHEN :submit = 1 THEN NOW() ELSE submitted_at END,
+      reject_reason = NULL,
+      submitted_at = ${submittedAtSql},
       last_actor_id = :actorId,
       last_actor_name = :actorName
      WHERE id = :id`,
     {
       id,
       payload: JSON.stringify(trad),
-      status: submit ? "pending_1" : status,
-      submit: submit ? 1 : 0,
+      status,
       actorId: user.id,
       actorName: user.displayName,
     },
   );
-  await addEvent(id, user, submit ? "submit" : "save");
+  await addEvent(
+    id,
+    user,
+    submit ? "submit" : "save",
+    req.status === "rejected"
+      ? submit
+        ? "驳回后重新提交"
+        : "驳回后暂存修改"
+      : undefined,
+  );
   const sourceDaikaoId = getSourceDaikaoId(trad);
-  if (sourceDaikaoId && (submit || req.status === "draft" || req.status === "rejected")) {
+  if (
+    sourceDaikaoId &&
+    (submit || req.status === "draft" || req.status === "rejected")
+  ) {
     await markDaikaoAdmitPending(sourceDaikaoId, id);
   }
   return getRequestById(id);

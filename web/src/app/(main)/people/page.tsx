@@ -351,6 +351,18 @@ export default function PeoplePage() {
     }
   }
 
+  function peopleEditHref(p: PeopleRow) {
+    const open =
+      p.reviewRequestId &&
+      p.reviewStatus &&
+      ["draft", "rejected", "pending_1", "pending_2", "pending_final"].includes(
+        p.reviewStatus,
+      );
+    // 已有未完结/驳回单：回到原单修改重提，避免另开一张对不上
+    if (open) return `/edit/${p.reviewRequestId}`;
+    return `/edit/new?from=${p.id}&op=update`;
+  }
+
   function renderActions(p: PeopleRow, compact = false) {
     if (!operable && !compact) {
       return (
@@ -365,8 +377,8 @@ export default function PeoplePage() {
           详情
         </ActionBtn>
         {operable && canEdit ? (
-          <ActionBtn className="bg-accent" href={`/edit/new?from=${p.id}&op=update`}>
-            编辑
+          <ActionBtn className="bg-accent" href={peopleEditHref(p)}>
+            {p.reviewStatus === "rejected" ? "改后重提" : "编辑"}
           </ActionBtn>
         ) : null}
         {operable ? (
@@ -416,10 +428,10 @@ export default function PeoplePage() {
             onKeyDown={(e) => {
               if (e.key === "Enter") applySearch();
             }}
-            placeholder="姓名"
+            placeholder="姓名/拼音"
           />
         </FilterField>
-        <FilterField className="w-28">
+        <FilterField className="w-32">
           <Input
             compact
             clearable
@@ -428,10 +440,10 @@ export default function PeoplePage() {
             onKeyDown={(e) => {
               if (e.key === "Enter") applySearch();
             }}
-            placeholder="父亲姓名"
+            placeholder="父亲姓名/拼音"
           />
         </FilterField>
-        <FilterField className="w-28">
+        <FilterField className="w-32">
           <Input
             compact
             clearable
@@ -440,7 +452,7 @@ export default function PeoplePage() {
             onKeyDown={(e) => {
               if (e.key === "Enter") applySearch();
             }}
-            placeholder="爷爷姓名"
+            placeholder="爷爷姓名/拼音"
           />
         </FilterField>
         <FilterField className="w-24">
@@ -835,9 +847,9 @@ export default function PeoplePage() {
               {canEdit ? (
                 <ActionBtn
                   className="bg-accent !px-3 !py-1.5"
-                  href={`/edit/new?from=${drawer.id}&op=update`}
+                  href={peopleEditHref(drawer)}
                 >
-                  编辑
+                  {drawer.reviewStatus === "rejected" ? "改后重提" : "编辑"}
                 </ActionBtn>
               ) : null}
             </div>
