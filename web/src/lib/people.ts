@@ -965,89 +965,91 @@ export async function getChildren(parentId: number) {
 
   await ensureSiblingOrderTable();
 
-  // 快路径：relation（含平台新录）+ sibling_order；避免 nested-set OR 扫全表
+  // 先按父节点索引取子 ID，再 IN 查人；禁止对 tb_people 做 OR 条件全表扫
+  const childIdSet = new Set<number>();
   if (hasRelation) {
-    const rows = await query<PeopleDb[]>(
-      `SELECT ${liteSelect},
-              r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID
-       FROM tb_people p
-       LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID
-       WHERE r.F_PARENT_ID = :parentId
-          OR p.F_ID IN (SELECT people_id FROM app_sibling_order WHERE parent_id = :parentId)
-       ORDER BY
-         (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END),
-         p.F_LEFT ASC, p.F_NO ASC, p.F_ID ASC
+    const relIds = await query<RowDataPacket[]>(
+      `SELECT F_PEOPLE_ID AS id FROM tb_people_relation
+       WHERE F_PARENT_ID = :parentId
        LIMIT 200`,
       { parentId },
     );
-    const seen = new Set<number>();
-    const unique = rows.filter((r) => {
-      const id = Number(r.F_ID);
-      if (seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-    // 补父名（sibling_order 命中但无 relation 时）
-    const parents = await query<RowDataPacket[]>(
-      `SELECT F_NAME FROM tb_people WHERE F_ID = :parentId LIMIT 1`,
-      { parentId },
-    );
-    const parentName = parents[0] ? String(parents[0].F_NAME || "") : "";
-    const mapped = unique.map((r) => {
-      const m = mapRow(r);
-      if (!m.parentId) {
-        m.parentId = parentId;
-        m.parentName = parentName || m.parentName;
-      }
-      return m;
-    });
-    const attached = await attachSiblingMeta(mapped);
-    return attachLatestReviewStatus(annotateRanks(sortByBirthOrder(attached)));
+    for (const r of relIds) childIdSet.add(Number(r.id));
   }
-
-  // 无 relation 表时才走 nested-set
-  await ensurePeopleIndexes();
-  const parents = await query<
-    (RowDataPacket & {
-      F_LEFT: number;
-      F_RIGHT: number;
-      F_LEVEL: number;
-      F_NAME: string;
-      F_FLAG: number | null;
-    })[]
-  >(
-    `SELECT F_LEFT, F_RIGHT, F_LEVEL, F_NAME, F_FLAG
-     FROM tb_people WHERE F_ID = :parentId LIMIT 1`,
+  const soIds = await query<RowDataPacket[]>(
+    `SELECT people_id AS id FROM app_sibling_order
+     WHERE parent_id = :parentId
+     LIMIT 200`,
     { parentId },
   );
-  const parent = parents[0];
-  if (!parent) return [];
+  for (const r of soIds) childIdSet.add(Number(r.id));
 
-  const flag = Number(parent.F_FLAG || 0);
+  // 无 relation 表时才用 nested-set 补子代 ID
+  if (!hasRelation && childIdSet.size === 0) {
+    await ensurePeopleIndexes();
+    const parents = await query<
+      (RowDataPacket & {
+        F_LEFT: number;
+        F_RIGHT: number;
+        F_LEVEL: number;
+        F_FLAG: number | null;
+      })[]
+    >(
+      `SELECT F_LEFT, F_RIGHT, F_LEVEL, F_FLAG
+       FROM tb_people WHERE F_ID = :parentId LIMIT 1`,
+      { parentId },
+    );
+    const parent = parents[0];
+    if (!parent) return [];
+    const flag = Number(parent.F_FLAG || 0);
+    const nestIds = await query<RowDataPacket[]>(
+      `SELECT p.F_ID AS id
+       FROM tb_people p
+       WHERE p.F_LEFT > :left AND p.F_RIGHT < :right
+         AND p.F_LEVEL = :childLevel
+         AND (:flag = 0 OR p.F_FLAG = :flag)
+       ORDER BY p.F_LEFT ASC
+       LIMIT 200`,
+      {
+        left: Number(parent.F_LEFT),
+        right: Number(parent.F_RIGHT),
+        childLevel: Number(parent.F_LEVEL) + 1,
+        flag,
+      },
+    );
+    for (const r of nestIds) childIdSet.add(Number(r.id));
+  }
+
+  if (childIdSet.size === 0) return [];
+
+  const childIds = [...childIdSet].slice(0, 200);
+  const placeholders = childIds.map(() => "?").join(",");
   const rows = await query<PeopleDb[]>(
     `SELECT ${liteSelect},
-            :parentId AS F_PARENT_ID, :parentName AS F_PARENT_NAME,
-            NULL AS F_FATHER_ID
+            r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID
      FROM tb_people p
-     WHERE (
-       (
-         p.F_LEFT > :left AND p.F_RIGHT < :right AND p.F_LEVEL = :childLevel
-         AND (:flag = 0 OR p.F_FLAG = :flag)
-       )
-       OR p.F_ID IN (SELECT people_id FROM app_sibling_order WHERE parent_id = :parentId)
-     )
-     ORDER BY p.F_LEFT ASC, p.F_NO ASC, p.F_ID ASC
-     LIMIT 200`,
-    {
-      parentId,
-      parentName: parent.F_NAME,
-      left: Number(parent.F_LEFT),
-      right: Number(parent.F_RIGHT),
-      childLevel: Number(parent.F_LEVEL) + 1,
-      flag,
-    },
+     LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID
+     WHERE p.F_ID IN (${placeholders})
+     ORDER BY
+       (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END),
+       p.F_LEFT ASC, p.F_NO ASC, p.F_ID ASC`,
+    childIds,
   );
-  const attached = await attachSiblingMeta(rows.map(mapRow));
+
+  const parents = await query<RowDataPacket[]>(
+    `SELECT F_NAME FROM tb_people WHERE F_ID = :parentId LIMIT 1`,
+    { parentId },
+  );
+  const parentName = parents[0] ? String(parents[0].F_NAME || "") : "";
+  const mapped = rows.map((r) => {
+    const m = mapRow(r);
+    if (!m.parentId) {
+      m.parentId = parentId;
+      m.parentName = parentName || m.parentName;
+    }
+    return m;
+  });
+  const attached = await attachSiblingMeta(mapped);
   return attachLatestReviewStatus(annotateRanks(sortByBirthOrder(attached)));
 }
 
