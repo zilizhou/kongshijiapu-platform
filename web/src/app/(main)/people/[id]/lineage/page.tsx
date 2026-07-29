@@ -235,8 +235,8 @@ function TreeBranch({
       ) : null}
       {kids.length ? (
         <>
-          <div className="my-2 h-5 w-px bg-line" />
-          <div className="flex flex-nowrap items-start justify-center gap-4 border-t border-line pt-3">
+          <div className="my-2 h-5 w-0.5 bg-[#8a9bb0]" />
+          <div className="flex flex-nowrap items-start justify-center gap-4 border-t-2 border-[#8a9bb0] pt-3">
             {kids.map((c, idx) => {
               const draggable = canDrag && !c.pending;
               return (
@@ -291,7 +291,7 @@ function TreeBranch({
                     ? "待审"
                     : `${["長", "次", "三", "四", "五", "六", "七", "八", "九", "十"][idx] || String(idx + 1)}${c.sex === "女" ? "女" : "子"}`}
                 </div>
-                <div className="mb-2 h-3 w-px bg-line" />
+                <div className="mb-2 h-3 w-0.5 bg-[#8a9bb0]" />
                 <TreeBranch
                   node={c}
                   focusId={focusId}
