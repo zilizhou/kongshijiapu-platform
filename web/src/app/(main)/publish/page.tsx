@@ -463,7 +463,7 @@ export default function PublishPage() {
                   label="向下代数"
                   value={down}
                   min={0}
-                  max={6}
+                  max={10}
                   onChange={setDown}
                 />
               </div>

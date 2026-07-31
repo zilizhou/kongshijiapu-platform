@@ -317,7 +317,7 @@ function LineageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const initUp = Math.min(10, Math.max(0, Number(search.get("up") || 1)));
-  const initDown = Math.min(6, Math.max(0, Number(search.get("down") || 1)));
+  const initDown = Math.min(10, Math.max(0, Number(search.get("down") || 1)));
   const [up, setUp] = useState(initUp);
   const [down, setDown] = useState(initDown);
   const [queryUp, setQueryUp] = useState(initUp);
@@ -512,7 +512,7 @@ function LineageInner() {
             label="向下代数"
             value={down}
             min={0}
-            max={6}
+            max={10}
             onChange={setDown}
           />
           <Button

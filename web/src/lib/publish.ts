@@ -379,7 +379,7 @@ export async function buildPublishByPerson(
   if (!focus) return null;
 
   const upN = Math.min(10, Math.max(0, up));
-  const downN = Math.min(6, Math.max(0, down));
+  const downN = Math.min(10, Math.max(0, down));
   const cap = 280;
 
   const ancestors = upN > 0 ? await getAncestors(personId, upN) : [];

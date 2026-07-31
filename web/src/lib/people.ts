@@ -2182,7 +2182,7 @@ export async function getLineageTree(
   opts?: { up?: number; down?: number },
 ) {
   const up = Math.min(10, Math.max(0, opts?.up ?? 1));
-  const down = Math.min(6, Math.max(0, opts?.down ?? 1));
+  const down = Math.min(10, Math.max(0, opts?.down ?? 1));
 
   const focus = await getPeopleById(id);
   if (!focus) return null;
