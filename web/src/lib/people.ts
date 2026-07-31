@@ -402,15 +402,16 @@ export async function searchPeople(opts: {
     fatherName || grandfatherName || opts.parentId,
   );
 
-  const relationJoins = [
-    needRelationJoin || needParentPeopleJoin || needGrandparentJoin
+  // COUNT / SELECT 共用同一套 JOIN，避免 WHERE 引用了未 JOIN 的别名
+  const fromJoins = [
+    hasRelation || needRelationJoin
       ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
       : "",
-    needParentPeopleJoin || needGrandparentJoin
-      ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = r.F_PARENT_ID"
-      : "",
-    needSiblingParentJoin
+    hasRelation || needSiblingParentJoin
       ? "LEFT JOIN app_sibling_order so ON so.people_id = p.F_ID"
+      : "",
+    hasRelation || needParentPeopleJoin
+      ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
       : "",
     fatherName
       ? "LEFT JOIN tb_people so_parent ON so_parent.F_ID = so.parent_id"
@@ -431,27 +432,6 @@ export async function searchPeople(opts: {
     .filter(Boolean)
     .join("\n     ");
 
-  // SELECT 路径始终带 relation（有表时），以便列表展示父名；父名优先 relation，其次排行表父
-  const joinRelationForSelect = hasRelation
-    ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
-    : "";
-  const parentGrandJoinsForSelect = [
-    hasRelation
-      ? "LEFT JOIN app_sibling_order so_sel ON so_sel.people_id = p.F_ID"
-      : "",
-    hasRelation
-      ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so_sel.parent_id)"
-      : "",
-    needGrandparentJoin
-      ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so_sel.parent_id)"
-      : "",
-    needGrandparentJoin
-      ? "LEFT JOIN tb_people grandpa_p ON grandpa_p.F_ID = gp.F_PARENT_ID"
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n     ");
-
   const courtesyJoin = needCourtesy
     ? "LEFT JOIN app_people_courtesy courtesy ON courtesy.people_id = p.F_ID"
     : "";
@@ -465,7 +445,7 @@ export async function searchPeople(opts: {
   }
 
   const selectParent = hasRelation
-    ? `COALESCE(NULLIF(r.F_PARENT_ID, 0), so_sel.parent_id) AS F_PARENT_ID,
+    ? `COALESCE(NULLIF(r.F_PARENT_ID, 0), so.parent_id) AS F_PARENT_ID,
             COALESCE(NULLIF(r.F_PARENT_NAME, ''), parent_p.F_NAME) AS F_PARENT_NAME,
             r.F_FATHER_ID`
     : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID";
@@ -495,7 +475,7 @@ export async function searchPeople(opts: {
   const countRows = await query<RowDataPacket[]>(
     `SELECT COUNT(*) AS c
      FROM tb_people p
-     ${relationJoins}
+     ${fromJoins}
      ${courtesyJoin}
      ${auditJoin}
      WHERE ${finalWhereSql}`,
@@ -529,8 +509,7 @@ export async function searchPeople(opts: {
             NULL AS F_COLLEGE, NULL AS F_DEGREE,
             ${selectChildCount}
      FROM tb_people p
-     ${joinRelationForSelect}
-     ${parentGrandJoinsForSelect}
+     ${fromJoins}
      ${courtesyJoin}
      ${auditJoin}
      WHERE ${finalWhereSql}
