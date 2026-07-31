@@ -1534,10 +1534,10 @@ async function upsertPeopleRelationParent(
     [
       opts.peopleId,
       opts.parentId,
-      parentName,
-      parentNo,
+      parentName.slice(0, 10),
+      parentNo.slice(0, 10),
       opts.birthFatherId || 0,
-      opts.pinyin || "",
+      (opts.pinyin || "").slice(0, 50),
     ],
   );
 }
@@ -1546,11 +1546,13 @@ async function upsertPeopleRelationParent(
 export async function repairMissingParentRelations() {
   if (!(await tableExists("tb_people_relation"))) return { fixed: 0 };
   await ensureSiblingOrderTable();
+  // F_PARENT_NAME/NO 仅 varchar(10)/pinyin(50)，需截断以免整批插入失败
   const result = await execute(
     `INSERT INTO tb_people_relation
       (F_PEOPLE_ID, F_FATHER, F_PARENT_ID, F_PARENT_NAME, F_PARENT_NO, F_FATHER_ID, F_FATHER_NO, F_PINYIN)
      SELECT s.people_id, '', s.parent_id,
-            IFNULL(pp.F_NAME, ''), IFNULL(pp.F_NO, ''), 0, '', IFNULL(p.F_PINYIN, '')
+            LEFT(IFNULL(pp.F_NAME, ''), 10), LEFT(IFNULL(pp.F_NO, ''), 10),
+            0, '', LEFT(IFNULL(p.F_PINYIN, ''), 50)
      FROM app_sibling_order s
      JOIN tb_people p ON p.F_ID = s.people_id
      LEFT JOIN tb_people pp ON pp.F_ID = s.parent_id
