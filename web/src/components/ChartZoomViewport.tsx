@@ -22,20 +22,26 @@ export function ChartZoomViewport({
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [natural, setNatural] = useState({ w: 0, h: 0 });
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
 
   useEffect(() => {
     scaleRef.current = scale;
   }, [scale]);
 
   useEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
+    const content = contentRef.current;
+    const vp = viewportRef.current;
+    if (!content || !vp) return;
+
     const measure = () => {
-      setNatural({ w: el.offsetWidth, h: el.offsetHeight });
+      setNatural({ w: content.offsetWidth, h: content.offsetHeight });
+      setViewport({ w: vp.clientWidth, h: vp.clientHeight });
     };
     measure();
+
     const ro = new ResizeObserver(measure);
-    ro.observe(el);
+    ro.observe(content);
+    ro.observe(vp);
     return () => ro.disconnect();
   }, []);
 
@@ -74,6 +80,11 @@ export function ChartZoomViewport({
   }, [applyZoom]);
 
   const pct = Math.round(scale * 100);
+  const scaledW = natural.w ? Math.ceil(natural.w * scale) : 0;
+  const scaledH = natural.h ? Math.ceil(natural.h * scale) : 0;
+  // 画布至少铺满视口，缩放块在其中水平+垂直居中；超出时再扩展以便滚动
+  const canvasW = Math.max(viewport.w || 0, scaledW);
+  const canvasH = Math.max(viewport.h || 0, scaledH);
 
   return (
     <div className="relative">
@@ -111,20 +122,31 @@ export function ChartZoomViewport({
 
       <div
         ref={viewportRef}
-        className={`max-h-[min(72vh,calc(100vh-200px))] overflow-auto overscroll-contain ${className}`}
+        className={`h-[min(72vh,calc(100vh-200px))] overflow-auto overscroll-contain ${className}`}
       >
         <div
+          className="flex items-center justify-center"
           style={{
-            width: natural.w ? Math.ceil(natural.w * scale) : undefined,
-            height: natural.h ? Math.ceil(natural.h * scale) : undefined,
+            width: canvasW || "100%",
+            minWidth: "100%",
+            height: canvasH || "100%",
+            minHeight: "100%",
           }}
         >
           <div
-            ref={contentRef}
-            className="inline-block origin-top-left will-change-transform"
-            style={{ transform: `scale(${scale})` }}
+            className="relative shrink-0"
+            style={{
+              width: scaledW || undefined,
+              height: scaledH || undefined,
+            }}
           >
-            {children}
+            <div
+              ref={contentRef}
+              className="inline-block origin-top-left will-change-transform"
+              style={{ transform: `scale(${scale})` }}
+            >
+              {children}
+            </div>
           </div>
         </div>
       </div>
