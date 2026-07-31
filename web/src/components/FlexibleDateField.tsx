@@ -54,20 +54,13 @@ export function FlexibleDateField({
 
   useEffect(() => {
     if (value === prevValue.current) return;
-    const prev = prevValue.current;
     prevValue.current = value;
     if (!value) return;
     const next = parseFlexible(value);
-    const prevParsed = parseFlexible(prev);
     setPrecision((curr) => {
-      // 同一次编辑里值仍只有年份时，勿把用户选的「年月/年月日」打回「仅年」
-      if (
-        next.precision === "year" &&
-        (curr === "month" || curr === "day") &&
-        (!prev || next.year === prevParsed.year)
-      ) {
-        return curr;
-      }
+      const rank = { year: 0, month: 1, day: 2 } as const;
+      // 字符串尚未含月/日时精度偏低，勿覆盖用户已选的「年月/年月日」
+      if (rank[next.precision] < rank[curr]) return curr;
       return next.precision;
     });
   }, [value]);
