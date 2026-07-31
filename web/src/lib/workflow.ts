@@ -832,12 +832,16 @@ export async function listRequests(opts: {
 }
 
 export async function listEvents(requestId: number) {
-  return query<RowDataPacket[]>(
+  const rows = await query<RowDataPacket[]>(
     `SELECT id, actor_name, actor_role, action, note, created_at
      FROM app_change_events WHERE request_id = :requestId
      ORDER BY id ASC`,
     { requestId },
   );
+  return rows.map((r) => ({
+    ...r,
+    created_at: formatDateTime(r.created_at as Date | string) || "",
+  }));
 }
 
 export async function listWorkRecords(opts: {
@@ -890,7 +894,10 @@ export async function listWorkRecords(opts: {
     total: Number(countRows[0]?.c || 0),
     page,
     pageSize,
-    items: rows,
+    items: rows.map((r) => ({
+      ...r,
+      created_at: formatDateTime(r.created_at as Date | string) || "",
+    })),
   };
 }
 
