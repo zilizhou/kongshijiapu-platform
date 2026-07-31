@@ -9,9 +9,10 @@ import {
   LineageAddDialog,
   LineageContextMenu,
 } from "@/components/LineageAddDialog";
+import { ChartZoomViewport } from "@/components/ChartZoomViewport";
 import { PersonNodeDrawer } from "@/components/PersonNodeDrawer";
 import { PeopleListBackLink } from "@/components/PeopleListBackLink";
-import { Button, Card, PageHeader, TableScroll } from "@/components/ui";
+import { Button, Card, PageHeader } from "@/components/ui";
 import type { PeopleRow, SessionUser } from "@/lib/types";
 
 type Payload = {
@@ -208,7 +209,7 @@ function YiziInner() {
 
       {data && !loading ? (
         <Card className="overflow-hidden p-0">
-          <TableScroll className="p-6">
+          <ChartZoomViewport className="p-6">
           <div className="mx-auto flex max-w-md flex-col items-center">
             {data.line.map((p, idx) => {
               const focus = p.id === data.focus.id;
@@ -263,9 +264,9 @@ function YiziInner() {
             })}
           </div>
           <div className="mt-6 text-center text-xs text-muted">
-            上 {data.ancestorCount} 代 · 下 {data.descendantCount} 代 · 点击节点查看详情
+            上 {data.ancestorCount} 代 · 下 {data.descendantCount} 代 · 点击节点查看详情 · 右上角可缩放
           </div>
-          </TableScroll>
+          </ChartZoomViewport>
         </Card>
       ) : null}
 

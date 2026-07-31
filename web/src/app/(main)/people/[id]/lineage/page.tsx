@@ -9,9 +9,10 @@ import {
   LineageAddDialog,
   LineageContextMenu,
 } from "@/components/LineageAddDialog";
+import { ChartZoomViewport } from "@/components/ChartZoomViewport";
 import { PersonNodeDrawer } from "@/components/PersonNodeDrawer";
 import { PeopleListBackLink } from "@/components/PeopleListBackLink";
-import { Button, Card, PageHeader, TableScroll } from "@/components/ui";
+import { Button, Card, PageHeader } from "@/components/ui";
 import type { LineageNode, PeopleRow, SessionUser } from "@/lib/types";
 
 type Payload = {
@@ -561,7 +562,7 @@ function LineageInner() {
 
       {data && !loading ? (
         <Card className="overflow-hidden p-0">
-          <TableScroll className="p-6">
+          <ChartZoomViewport className="p-6">
             {(data.pendingParents || []).length ? (
               <div className="mb-4 flex flex-col items-center gap-2">
                 <div className="text-xs text-muted">待审父辈（尚未入库）</div>
@@ -626,9 +627,9 @@ function LineageInner() {
             </div>
 
             <div className="mt-8 text-center text-xs text-muted">
-              宽谱展示：各代同父兄弟及其分支一并画出 · 可横向滚动 · 金色为当前人物
+              宽谱展示：各代同父兄弟及其分支一并画出 · 可滚动 · 右上角可缩放 · 金色为当前人物
             </div>
-          </TableScroll>
+          </ChartZoomViewport>
         </Card>
       ) : null}
 
