@@ -38,6 +38,48 @@ import { toTraditionalBranchPayload, toTraditionalPayload } from "./zh";
 
 export type { ChangeRequest };
 
+/**
+ * 待审链式新增：parentId / asParentOf 可为负（-变更单ID）。
+ * 终审落库前解析为已入库的真实人物 ID。
+ */
+async function resolvePendingCreateRefs(
+  payload: PeoplePayload,
+): Promise<PeoplePayload> {
+  const next = { ...payload };
+
+  if (next.parentId != null && Number(next.parentId) < 0) {
+    const reqId = Math.abs(Number(next.parentId));
+    const rows = await query<RowDataPacket[]>(
+      `SELECT object_id, status FROM app_change_requests WHERE id = :id LIMIT 1`,
+      { id: reqId },
+    );
+    const row = rows[0];
+    if (!row || row.status !== "approved" || !row.object_id) {
+      throw new Error(
+        `关联的父节点变更单 #${reqId} 尚未终审通过，请先审核通过后再审本单`,
+      );
+    }
+    next.parentId = Number(row.object_id);
+  }
+
+  if (next.asParentOf != null && Number(next.asParentOf) < 0) {
+    const reqId = Math.abs(Number(next.asParentOf));
+    const rows = await query<RowDataPacket[]>(
+      `SELECT object_id, status FROM app_change_requests WHERE id = :id LIMIT 1`,
+      { id: reqId },
+    );
+    const row = rows[0];
+    if (!row || row.status !== "approved" || !row.object_id) {
+      throw new Error(
+        `关联的子节点变更单 #${reqId} 尚未终审通过，请先审核通过该人物后再审本父节点单`,
+      );
+    }
+    next.asParentOf = Number(row.object_id);
+  }
+
+  return next;
+}
+
 type RequestDb = RowDataPacket & {
   id: number;
   object_type: ObjectType;
@@ -545,8 +587,9 @@ export async function approveRequest(id: number, user: SessionUser) {
     }
 
     await withTransaction(async (conn) => {
-      const peoplePayload = req.payload as PeoplePayload;
+      let peoplePayload = req.payload as PeoplePayload;
       if (req.operation === "create") {
+        peoplePayload = await resolvePendingCreateRefs(peoplePayload);
         const newId = await applyPeopleCreate(conn, peoplePayload);
         await conn.execute(
           `UPDATE app_change_requests SET status='approved', object_id=?, approved_at=NOW(),

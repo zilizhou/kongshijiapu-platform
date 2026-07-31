@@ -1874,43 +1874,98 @@ function walkInjectChild(
   return false;
 }
 
+/** 将待审父节点插到目标子节点上方（子可为已入库或待审负 ID） */
+function walkInjectAsParent(
+  node: LineageNode,
+  childId: number,
+  parent: LineageNode,
+): boolean {
+  for (let i = 0; i < node.children.length; i++) {
+    if (node.children[i].id === childId) {
+      parent.children = [node.children[i], ...parent.children];
+      node.children[i] = parent;
+      return true;
+    }
+    if (walkInjectAsParent(node.children[i], childId, parent)) return true;
+  }
+  return false;
+}
+
+function mapPendingCreateRow(r: RowDataPacket): PendingCreate {
+  const payload =
+    typeof r.payload === "string"
+      ? (JSON.parse(r.payload) as PeoplePayload)
+      : (r.payload as PeoplePayload);
+  const parentId =
+    payload.parentId != null && Number(payload.parentId) !== 0
+      ? Number(payload.parentId)
+      : null;
+  const asParentOf =
+    payload.asParentOf != null && Number(payload.asParentOf) !== 0
+      ? Number(payload.asParentOf)
+      : null;
+  return {
+    requestId: Number(r.id),
+    name: String(payload.name || ""),
+    sex: payload.sex === "女" ? "女" : "男",
+    level: payload.level ?? null,
+    rank: payload.rank || null,
+    parentId,
+    asParentOf,
+  };
+}
+
+/**
+ * 加载挂在已入库人物上的待审新增，并继续拉取挂在待审节点上的链式新增
+ *（parentId / asParentOf 可为负：-requestId）。
+ */
 async function loadPendingCreates(
   relatedIds: number[],
 ): Promise<PendingCreate[]> {
   if (!relatedIds.length) return [];
-  const placeholders = relatedIds.map((_, i) => `:id${i}`).join(",");
-  const params: Record<string, unknown> = {};
-  relatedIds.forEach((v, i) => {
-    params[`id${i}`] = v;
-  });
-  const rows = await query<RowDataPacket[]>(
-    `SELECT id, payload
-     FROM app_change_requests
-     WHERE operation = 'create'
-       AND status IN ('draft', 'pending_1', 'pending_2', 'pending_final')
-       AND (
-         CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.parentId')) AS UNSIGNED) IN (${placeholders})
-         OR CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.asParentOf')) AS UNSIGNED) IN (${placeholders})
-       )
-     ORDER BY id ASC
-     LIMIT 80`,
-    params,
-  );
-  return rows.map((r) => {
-    const payload =
-      typeof r.payload === "string"
-        ? (JSON.parse(r.payload) as PeoplePayload)
-        : (r.payload as PeoplePayload);
-    return {
-      requestId: Number(r.id),
-      name: String(payload.name || ""),
-      sex: payload.sex === "女" ? "女" : "男",
-      level: payload.level ?? null,
-      rank: payload.rank || null,
-      parentId: payload.parentId ? Number(payload.parentId) : null,
-      asParentOf: payload.asParentOf ? Number(payload.asParentOf) : null,
-    };
-  });
+  const found = new Map<number, PendingCreate>();
+  let anchors = [...relatedIds];
+
+  for (let round = 0; round < 6 && anchors.length; round++) {
+    const placeholders = anchors.map((_, i) => `:a${round}_${i}`).join(",");
+    const params: Record<string, unknown> = {};
+    anchors.forEach((v, i) => {
+      params[`a${round}_${i}`] = v;
+    });
+    const exclude = [...found.keys()];
+    const excludeSql = exclude.length
+      ? `AND id NOT IN (${exclude.map((_, i) => `:ex${round}_${i}`).join(",")})`
+      : "";
+    exclude.forEach((v, i) => {
+      params[`ex${round}_${i}`] = v;
+    });
+
+    const rows = await query<RowDataPacket[]>(
+      `SELECT id, payload
+       FROM app_change_requests
+       WHERE operation = 'create'
+         AND status IN ('draft', 'pending_1', 'pending_2', 'pending_final')
+         AND (
+           CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.parentId')) AS SIGNED) IN (${placeholders})
+           OR CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.asParentOf')) AS SIGNED) IN (${placeholders})
+         )
+         ${excludeSql}
+       ORDER BY id ASC
+       LIMIT 80`,
+      params,
+    );
+    const nextAnchors: number[] = [];
+    for (const r of rows) {
+      const pc = mapPendingCreateRow(r);
+      if (found.has(pc.requestId)) continue;
+      found.set(pc.requestId, pc);
+      // 下一轮以待审节点负 ID 为锚，拉取再下一层
+      nextAnchors.push(-pc.requestId);
+    }
+    anchors = nextAnchors;
+  }
+
+  return [...found.values()];
 }
 
 type FlatNode = PeopleRow & { left: number; right: number };
@@ -2291,16 +2346,15 @@ export async function getLineageTree(
       reviewingIds = reviewing.map((r) => Number(r.id)).filter(Boolean);
 
       const pendingCreates = await loadPendingCreates(ids);
-      for (const pc of pendingCreates) {
+      // 先挂子代，再把「待审父」插到目标子上方，以便链式待审能叠起来
+      const asParents = pendingCreates.filter((pc) => pc.asParentOf);
+      const asChildren = pendingCreates.filter((pc) => !pc.asParentOf);
+
+      for (const pc of asChildren) {
         const node = pendingToNode(pc);
-        if (pc.asParentOf) {
-          pendingParents.push({ asParentOf: pc.asParentOf, node });
+        if (pc.parentId != null && walkInjectChild(tree, pc.parentId, node)) {
           continue;
         }
-        if (pc.parentId && walkInjectChild(tree, pc.parentId, node)) {
-          continue;
-        }
-        // 父节点不在树中时，与中心同父的待审兄弟仍旁挂
         if (
           pc.parentId != null &&
           focus.parentId != null &&
@@ -2308,6 +2362,25 @@ export async function getLineageTree(
         ) {
           pendingSiblings.push(node);
         }
+      }
+
+      for (const pc of asParents) {
+        const node = pendingToNode(pc);
+        const target = pc.asParentOf!;
+        // 挂已入库成员：仍用顶部「待审父辈」条，保持原交互
+        if (target > 0) {
+          pendingParents.push({ asParentOf: target, node });
+          continue;
+        }
+        // 挂另一待审节点：插到树内或旁挂兄弟上
+        if (walkInjectAsParent(tree, target, node)) continue;
+        const sibIdx = pendingSiblings.findIndex((s) => s.id === target);
+        if (sibIdx >= 0) {
+          node.children = [pendingSiblings[sibIdx], ...node.children];
+          pendingSiblings[sibIdx] = node;
+          continue;
+        }
+        pendingParents.push({ asParentOf: target, node });
       }
     }
   } catch {

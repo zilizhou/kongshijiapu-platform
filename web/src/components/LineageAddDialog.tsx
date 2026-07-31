@@ -135,6 +135,22 @@ export function LineageAddDialog({
     setError("");
     setSavedId(null);
 
+    // 待审节点 ID 为 -变更单ID，无人物详情接口，直接用图上信息预填
+    if (anchorId < 0) {
+      if (!applySeedFallback("")) {
+        setError(
+          relation === "sibling"
+            ? "该待审节点缺少同父信息，请改从父节点下新增子节点"
+            : "无法准备表单",
+        );
+      } else {
+        setError(
+          `相对人物为待审新增（编修单 #${Math.abs(anchorId)}），请核对派户支与父节点；链式待审需按挂靠顺序终审。`,
+        );
+      }
+      return;
+    }
+
     const ctrl = new AbortController();
     const timer = window.setTimeout(() => ctrl.abort(), 15000);
 
@@ -225,12 +241,18 @@ export function LineageAddDialog({
           <div>
             <h2 className="font-display text-xl text-ink">{TITLE[relation]}</h2>
             <p className="mt-1 text-xs text-muted">
-              相对人物：{anchorName}（ID {anchorId}）
+              相对人物：{anchorName}
+              {anchorId < 0
+                ? `（待审编修单 #${Math.abs(anchorId)}）`
+                : `（ID ${anchorId}）`}
               {relation === "parent"
                 ? " · 终审通过后插入为其父节点"
                 : relation === "sibling"
                   ? " · 与其同父"
                   : " · 挂为其子代"}
+              {anchorId < 0
+                ? "；链式待审需先终审通过被挂靠的节点"
+                : ""}
             </p>
           </div>
           <Button variant="ghost" onClick={onClose}>

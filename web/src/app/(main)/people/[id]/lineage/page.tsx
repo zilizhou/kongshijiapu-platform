@@ -131,7 +131,9 @@ function PersonCard({
       )}`}
       title={
         pending
-          ? `待审新增 · 编修单 #${p.requestId}`
+          ? canEdit
+            ? `待审新增 · 编修单 #${p.requestId} · 左键查看编修单 · 右键可再增父/兄/子`
+            : `待审新增 · 编修单 #${p.requestId}`
           : focus
             ? "当前人物 · 点击查看详情"
             : reviewing
@@ -145,7 +147,7 @@ function PersonCard({
         else onOpen(p.id);
       }}
       onContextMenu={(e) => {
-        if (!canEdit || pending) return;
+        if (!canEdit) return;
         e.preventDefault();
         e.stopPropagation();
         onContextMenu(e, { id: p.id, name: p.name });
@@ -414,7 +416,7 @@ function LineageInner() {
         seed.groupName = a.groupName || data.focus.groupName;
         return seed;
       }
-      // 在统一宽谱树中查找：父节点即当前遍历节点
+      // 在统一宽谱树中查找：父节点即当前遍历节点（含待审负 ID）
       const walk = (node: LineageNode, parentId: number | null): boolean => {
         if (node.id === id) {
           seed.sex = node.sex;
@@ -434,6 +436,28 @@ function LineageInner() {
             ? data.ancestors[0].parentId ?? null
             : data.focus.parentId;
         walk(data.tree, rootParent);
+      }
+      // 旁挂待审兄弟 / 待审父辈
+      if (seed.level == null) {
+        for (const s of data.pendingSiblings || []) {
+          if (s.id === id) {
+            seed.sex = s.sex;
+            seed.level = s.level;
+            seed.parentId = data.focus.parentId;
+            break;
+          }
+        }
+      }
+      if (seed.level == null) {
+        for (const p of data.pendingParents || []) {
+          if (p.node.id === id) {
+            seed.sex = p.node.sex;
+            seed.level = p.node.level;
+            // 作为某人父辈插入时，其父取目标成员的原父（图上未知则空）
+            seed.parentId = null;
+            break;
+          }
+        }
       }
       if (seed.groupName == null) seed.groupName = data.focus.groupName;
       return seed;
@@ -549,7 +573,7 @@ function LineageInner() {
         <p className="mt-2 text-xs text-muted">
           左键查看详情{canEdit ? "并可编辑" : ""}；新增用右侧抽屉。
           {canEdit
-            ? "右键新增父/兄弟/子；拖拽同父兄弟调整长幼（最左为长），确认后提交审核。"
+            ? "右键新增父/兄弟/子（含待审新增节点）；拖拽同父兄弟调整长幼（最左为长），确认后提交审核。"
             : "设为中心可在详情抽屉中操作。"}
         </p>
         {reorderMsg ? (
