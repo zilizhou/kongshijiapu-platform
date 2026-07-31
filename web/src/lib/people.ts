@@ -200,6 +200,43 @@ function nameOrPinyinClause(
   return `(${namePart} OR ${pyPart})`;
 }
 
+/** 按姓名/拼音定位人物 ID，供父系条件走索引 */
+async function findPeopleIdsByName(name: string, limit = 80): Promise<number[]> {
+  const variants = searchTextVariants(name);
+  if (!variants.length) return [];
+
+  const exactParams: Record<string, unknown> = {};
+  const exactParts = variants.map((v, i) => {
+    const key = `ex${i}`;
+    exactParams[key] = v;
+    return `p.F_NAME = :${key}`;
+  });
+  const exactRows = await query<RowDataPacket[]>(
+    `SELECT p.F_ID AS id
+     FROM tb_people p
+     WHERE (${exactParts.join(" OR ")})
+     ORDER BY (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END), p.F_ID DESC
+     LIMIT ${Math.max(1, Math.min(200, limit))}`,
+    exactParams,
+  );
+  if (exactRows.length) {
+    return exactRows.map((r) => Number(r.id)).filter((id) => id > 0);
+  }
+
+  const params: Record<string, unknown> = {};
+  const nameClause = likeOrClause(["p.F_NAME"], variants, "fn", params);
+  const pyClause = pinyinLikeClause("p.F_PINYIN", name, "fnPy", params);
+  const rows = await query<RowDataPacket[]>(
+    `SELECT p.F_ID AS id
+     FROM tb_people p
+     WHERE (${nameClause} OR ${pyClause})
+     ORDER BY (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END), p.F_ID DESC
+     LIMIT ${Math.max(1, Math.min(200, limit))}`,
+    params,
+  );
+  return rows.map((r) => Number(r.id)).filter((id) => id > 0);
+}
+
 export async function searchPeople(opts: {
   q?: string;
   name?: string;
@@ -262,40 +299,34 @@ export async function searchPeople(opts: {
       );
     }
   }
+  // 父/祖父：先按姓名定位 ID，再走索引 F_PARENT_ID（避免对父名全表 LIKE，且能命中新人）
+  let fatherIds: number[] = [];
+  let grandfatherIds: number[] = [];
   if (fatherName) {
-    // relation 父名/现名/拼音，或排行表父（补 relation 缺失时仍可命中）
-    const byRelation = nameOrPinyinClause(
-      ["r.F_PARENT_NAME", "parent_p.F_NAME"],
-      "parent_p.F_PINYIN",
-      fatherName,
-      "fatherName",
-      params,
+    fatherIds = await findPeopleIdsByName(fatherName, 80);
+    if (!fatherIds.length) {
+      return { total: 0, page, pageSize, items: [] };
+    }
+    const ph = fatherIds.map((_, i) => `:fid${i}`).join(",");
+    fatherIds.forEach((id, i) => {
+      params[`fid${i}`] = id;
+    });
+    where.push(
+      `(r.F_PARENT_ID IN (${ph}) OR so.parent_id IN (${ph}))`,
     );
-    const bySibling = nameOrPinyinClause(
-      ["so_parent.F_NAME"],
-      "so_parent.F_PINYIN",
-      fatherName,
-      "fatherNameSo",
-      params,
-    );
-    where.push(`((${byRelation}) OR (${bySibling}))`);
   }
   if (grandfatherName) {
-    const byRelation = nameOrPinyinClause(
-      ["gp.F_PARENT_NAME", "grandpa_p.F_NAME"],
-      "grandpa_p.F_PINYIN",
-      grandfatherName,
-      "grandfatherName",
-      params,
+    grandfatherIds = await findPeopleIdsByName(grandfatherName, 80);
+    if (!grandfatherIds.length) {
+      return { total: 0, page, pageSize, items: [] };
+    }
+    const ph = grandfatherIds.map((_, i) => `:gid${i}`).join(",");
+    grandfatherIds.forEach((id, i) => {
+      params[`gid${i}`] = id;
+    });
+    where.push(
+      `(gp.F_PARENT_ID IN (${ph}) OR so_parent_meta.parent_id IN (${ph}))`,
     );
-    const bySibling = nameOrPinyinClause(
-      ["so_gp.F_NAME"],
-      "so_gp.F_PINYIN",
-      grandfatherName,
-      "grandfatherNameSo",
-      params,
-    );
-    where.push(`((${byRelation}) OR (${bySibling}))`);
   }
   if (pinyin) {
     where.push(pinyinLikeClause("p.F_PINYIN", pinyin, "pinyin", params));
@@ -396,13 +427,12 @@ export async function searchPeople(opts: {
   const needRelationJoin =
     hasRelation &&
     Boolean(opts.parentId || fatherName || grandfatherName);
-  const needParentPeopleJoin = hasRelation && Boolean(fatherName);
   const needGrandparentJoin = hasRelation && Boolean(grandfatherName);
   const needSiblingParentJoin = Boolean(
     fatherName || grandfatherName || opts.parentId,
   );
 
-  // COUNT / SELECT 共用同一套 JOIN，避免 WHERE 引用了未 JOIN 的别名
+  // COUNT / SELECT 共用同一套 JOIN；父系条件已改为 parent_id IN (...)
   const fromJoins = [
     hasRelation || needRelationJoin
       ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
@@ -410,23 +440,14 @@ export async function searchPeople(opts: {
     hasRelation || needSiblingParentJoin
       ? "LEFT JOIN app_sibling_order so ON so.people_id = p.F_ID"
       : "",
-    hasRelation || needParentPeopleJoin
+    hasRelation
       ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
-      : "",
-    fatherName
-      ? "LEFT JOIN tb_people so_parent ON so_parent.F_ID = so.parent_id"
       : "",
     needGrandparentJoin
       ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
       : "",
-    needGrandparentJoin
-      ? "LEFT JOIN tb_people grandpa_p ON grandpa_p.F_ID = gp.F_PARENT_ID"
-      : "",
     grandfatherName
       ? "LEFT JOIN app_sibling_order so_parent_meta ON so_parent_meta.people_id = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
-      : "",
-    grandfatherName
-      ? "LEFT JOIN tb_people so_gp ON so_gp.F_ID = so_parent_meta.parent_id"
       : "",
   ]
     .filter(Boolean)
