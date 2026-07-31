@@ -810,6 +810,22 @@ export default function PeoplePage() {
                 关闭
               </Button>
             </div>
+            <div className="mb-5 flex flex-wrap gap-2 border-b border-line pb-4">
+              <ActionBtn className="bg-[#2f6b4f] !px-3 !py-1.5" href={`/people/${drawer.id}/lineage`}>
+                世系图
+              </ActionBtn>
+              <ActionBtn className="bg-[#6b7280] !px-3 !py-1.5" href={`/people/${drawer.id}/yizi`}>
+                一字图
+              </ActionBtn>
+              {canEdit ? (
+                <ActionBtn
+                  className="bg-accent !px-3 !py-1.5"
+                  href={peopleEditHref(drawer)}
+                >
+                  {drawer.reviewStatus === "rejected" ? "改后重提" : "编辑"}
+                </ActionBtn>
+              ) : null}
+            </div>
             <dl className="space-y-3 text-sm">
               {[
                 ["所属派户支", formatGroup(drawer.groupName)],
@@ -837,22 +853,6 @@ export default function PeoplePage() {
                 </div>
               ))}
             </dl>
-            <div className="mt-6 flex flex-wrap gap-2">
-              <ActionBtn className="bg-[#2f6b4f] !px-3 !py-1.5" href={`/people/${drawer.id}/lineage`}>
-                世系图
-              </ActionBtn>
-              <ActionBtn className="bg-[#6b7280] !px-3 !py-1.5" href={`/people/${drawer.id}/yizi`}>
-                一字图
-              </ActionBtn>
-              {canEdit ? (
-                <ActionBtn
-                  className="bg-accent !px-3 !py-1.5"
-                  href={peopleEditHref(drawer)}
-                >
-                  {drawer.reviewStatus === "rejected" ? "改后重提" : "编辑"}
-                </ActionBtn>
-              ) : null}
-            </div>
           </div>
         </div>
       ) : null}
