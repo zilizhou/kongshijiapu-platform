@@ -91,10 +91,26 @@ export function PersonNodeDrawer({
     };
   }, [personId]);
 
-  async function submit(submit: boolean) {
+  async function submit(asSubmit: boolean) {
     if (!payload || !person) return;
-    if (!payload.name.trim()) {
+    if (!payload.name?.trim()) {
       setError("请填写姓名");
+      return;
+    }
+    if (!payload.group?.trim()) {
+      setError("请填写所属派户支");
+      return;
+    }
+    // 待审中不可再开/合并暂存，需先去编修页撤回
+    if (
+      person.reviewStatus &&
+      ["pending_1", "pending_2", "pending_final"].includes(person.reviewStatus)
+    ) {
+      setError(
+        person.reviewRequestId
+          ? `该成员已有待审变更单 #${person.reviewRequestId}，请先在「我的编修」撤回后再改`
+          : "该成员已有待审变更，请先撤回后再改",
+      );
       return;
     }
     setSaving(true);
@@ -106,7 +122,7 @@ export function PersonNodeDrawer({
         ? await fetch(`/api/requests/${resumableRequestId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ payload: body, submit }),
+            body: JSON.stringify({ payload: body, submit: asSubmit }),
           })
         : await fetch("/api/requests", {
             method: "POST",
@@ -115,12 +131,14 @@ export function PersonNodeDrawer({
               operation: "update",
               objectId: person.id,
               payload: body,
-              submit,
+              submit: asSubmit,
             }),
           });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "保存失败");
-      setSavedId(data.item.id);
+      const rid = data?.item?.id;
+      if (!rid) throw new Error("保存成功但未返回变更单号");
+      setSavedId(rid);
       setEditing(false);
       onSaved?.();
     } catch (e) {
@@ -227,54 +245,69 @@ export function PersonNodeDrawer({
               ))}
             </dl>
           ) : null}
-          {error && person ? (
-            <p className="mt-4 text-sm text-danger">{error}</p>
-          ) : null}
         </div>
 
         {!loading && person && !savedId ? (
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-line bg-soft/40 px-5 py-4">
-            {editing ? (
-              <>
-                <Button
-                  variant="secondary"
-                  disabled={saving}
-                  onClick={() => {
-                    setEditing(false);
-                    setPayload(peopleToPayload(person));
-                    setError("");
-                  }}
-                >
-                  取消编辑
-                </Button>
-                <Button
-                  variant="secondary"
-                  disabled={saving}
-                  onClick={() => submit(false)}
-                >
-                  暂存
-                </Button>
-                <Button disabled={saving} onClick={() => submit(true)}>
-                  提交审核
-                </Button>
-              </>
-            ) : (
-              <>
-                <Link
-                  href={focusHref}
-                  className="inline-flex items-center justify-center rounded-lg border border-line bg-white px-3.5 py-2 text-sm font-medium text-ink transition hover:bg-soft"
-                >
-                  设为中心
-                </Link>
-                {canEdit ? (
-                  <Button type="button" className="shrink-0" onClick={() => setEditing(true)}>
-                    编辑
+          <div className="shrink-0 border-t border-line bg-soft/40 px-5 py-4">
+            {error ? (
+              <p className="mb-3 text-sm text-danger">{error}</p>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {editing ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={saving}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setEditing(false);
+                      setPayload(peopleToPayload(person));
+                      setError("");
+                    }}
+                  >
+                    取消编辑
                   </Button>
-                ) : (
-                  <span className="text-xs text-muted">当前角色仅可查看</span>
-                )}
-              </>
-            )}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={saving}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => submit(false)}
+                  >
+                    暂存
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={saving}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => submit(true)}
+                  >
+                    确认提交
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href={focusHref}
+                    className="inline-flex items-center justify-center rounded-lg border border-line bg-white px-3.5 py-2 text-sm font-medium text-ink transition hover:bg-soft"
+                  >
+                    设为中心
+                  </Link>
+                  {canEdit ? (
+                    <Button
+                      type="button"
+                      className="shrink-0"
+                      onClick={() => setEditing(true)}
+                    >
+                      编辑
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted">当前角色仅可查看</span>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         ) : null}
       </div>

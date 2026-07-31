@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
 import { Button } from "@/components/ui";
+import { normalizePeopleRank } from "@/lib/people-client";
 import { PeoplePayload, PeopleRow } from "@/lib/types";
 
 export type AddRelation = "parent" | "sibling" | "child";
@@ -191,8 +192,8 @@ export function LineageAddDialog({
     };
   }, [anchorId, relation, reloadKey, applySeedFallback]);
 
-  async function save(submit: boolean) {
-    if (!payload.name.trim()) {
+  async function save(asSubmit: boolean) {
+    if (!payload.name?.trim()) {
       setError("请填写姓名");
       return;
     }
@@ -213,13 +214,15 @@ export function LineageAddDialog({
         body: JSON.stringify({
           operation: "create",
           objectId: null,
-          payload,
-          submit,
+          payload: normalizePeopleRank(payload),
+          submit: asSubmit,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "保存失败");
-      setSavedId(data.item.id);
+      const rid = data?.item?.id;
+      if (!rid) throw new Error("保存成功但未返回变更单号");
+      setSavedId(rid);
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存失败");
@@ -289,30 +292,44 @@ export function LineageAddDialog({
               ) : null}
             </div>
           )}
-          {error && ready ? (
-            <p className="mt-4 text-sm text-accent">{error}</p>
-          ) : null}
         </div>
 
         {!savedId ? (
-          <div className="flex flex-wrap justify-end gap-2 border-t border-line bg-soft/40 px-5 py-4">
-            <Button variant="secondary" disabled={saving} onClick={onClose}>
-              取消
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={saving || !ready}
-              onClick={() => save(false)}
-            >
-              暂存
-            </Button>
-            <Button disabled={saving || !ready} onClick={() => save(true)}>
-              确认提交
-            </Button>
+          <div className="border-t border-line bg-soft/40 px-5 py-4">
+            {error ? (
+              <p className="mb-3 text-sm text-danger">{error}</p>
+            ) : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={saving}
+                onClick={onClose}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={saving || !ready}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => save(false)}
+              >
+                暂存
+              </Button>
+              <Button
+                type="button"
+                disabled={saving || !ready}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => save(true)}
+              >
+                确认提交
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="flex justify-end border-t border-line bg-soft/40 px-5 py-4">
-            <Button variant="secondary" onClick={onClose}>
+            <Button type="button" variant="secondary" onClick={onClose}>
               继续看图
             </Button>
           </div>

@@ -48,7 +48,12 @@ export default function EditDetailPage() {
     if (it.objectType === "branch") {
       setPayload({ ...emptyBranchPayload(), ...(it.payload as BranchPayload) });
     } else {
-      setPayload({ ...emptyPayload(), ...(it.payload as PeoplePayload) });
+      setPayload(
+        normalizePeopleRank({
+          ...emptyPayload(),
+          ...(it.payload as PeoplePayload),
+        }),
+      );
     }
     setEvents(data.events || []);
   }
@@ -241,8 +246,6 @@ export default function EditDetailPage() {
               compareWith={item.beforeSnapshot as PeoplePayload | null}
             />
           )}
-          {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}
-
           <div className="mt-8 border-t border-line pt-4">
             <div className="mb-3 font-display text-base">流转记录</div>
             <ul className="space-y-3 text-sm">
@@ -264,55 +267,71 @@ export default function EditDetailPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-soft/40 px-5 py-4">
-          <div className="flex flex-wrap gap-2">
-            {canDelete ? (
-              <Button
-                variant="danger"
-                disabled={saving}
-                onClick={removeRequest}
-              >
-                删除编修单
-              </Button>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <Link href="/edit">
-              <Button variant="secondary" disabled={saving}>
-                返回列表
-              </Button>
-            </Link>
-            {canWithdraw ? (
-              <Button
-                variant="secondary"
-                disabled={saving}
-                onClick={withdraw}
-              >
-                撤回提交
-              </Button>
-            ) : null}
-            {editable ? (
-              <>
+        <div className="border-t border-line bg-soft/40 px-5 py-4">
+          {error ? (
+            <p className="mb-3 text-sm text-danger">{error}</p>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
+              {canDelete ? (
                 <Button
+                  type="button"
+                  variant="danger"
                   disabled={saving}
-                  variant="secondary"
-                  onClick={() => save(false)}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={removeRequest}
                 >
-                  暂存
+                  删除编修单
                 </Button>
-                <Button disabled={saving} onClick={() => save(true)}>
-                  确认提交
+              ) : null}
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Link href="/edit">
+                <Button type="button" variant="secondary" disabled={saving}>
+                  返回列表
                 </Button>
-              </>
-            ) : !canWithdraw ? (
-              <p className="self-center text-sm text-muted">
-                当前状态不可编辑，仅可查看。
-              </p>
-            ) : (
-              <p className="self-center text-sm text-muted">
-                待审中：可撤回后修改，或删除本编修单。
-              </p>
-            )}
+              </Link>
+              {canWithdraw ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={saving}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={withdraw}
+                >
+                  撤回提交
+                </Button>
+              ) : null}
+              {editable ? (
+                <>
+                  <Button
+                    type="button"
+                    disabled={saving}
+                    variant="secondary"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => save(false)}
+                  >
+                    暂存
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={saving}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => save(true)}
+                  >
+                    确认提交
+                  </Button>
+                </>
+              ) : !canWithdraw ? (
+                <p className="self-center text-sm text-muted">
+                  当前状态不可编辑，仅可查看。
+                </p>
+              ) : (
+                <p className="self-center text-sm text-muted">
+                  待审中：可撤回后修改，或删除本编修单。
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </Card>

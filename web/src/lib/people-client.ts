@@ -49,9 +49,18 @@ export function peopleToPayload(p: PeopleRow): PeoplePayload {
   const hao = (p.hao || extracted.hao || "").trim();
   const alias = stripCourtesyFromAlias(p.alias || "", zi, hao);
 
+  const sex = p.sex === "女" ? "女" : "男";
+  const parsedRank = parseRankToIndex(p.rank || "");
+  const siblingOrder =
+    p.siblingOrder ?? (parsedRank != null ? parsedRank : null);
+  const rank =
+    siblingOrder != null
+      ? rankLabelSimplified(sex, siblingOrder)
+      : p.rank || "";
+
   return {
     name: p.name,
-    sex: p.sex === "女" ? "女" : "男",
+    sex,
     no: p.no || "",
     level: p.level,
     group: p.groupName || "",
@@ -72,8 +81,8 @@ export function peopleToPayload(p: PeopleRow): PeoplePayload {
     birthFatherId: p.birthFatherId,
     birthMother: "",
     currentMother: "",
-    rank: p.rank || "",
-    siblingOrder: p.siblingOrder ?? null,
+    rank,
+    siblingOrder,
     spouse: p.spouse || "",
     spouseInfo: p.spouseInfo || "",
     description: p.description || "",

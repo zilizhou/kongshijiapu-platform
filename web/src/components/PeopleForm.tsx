@@ -260,16 +260,14 @@ export function PeopleForm({
               if (idx == null) return;
               const sex = value.sex === "女" ? "女" : "男";
               const normalized = rankLabelSimplified(sex, idx);
-              if (
-                value.rank !== normalized ||
-                value.siblingOrder !== idx
-              ) {
-                onChange({
-                  ...value,
-                  siblingOrder: idx,
-                  rank: normalized,
-                });
+              if (value.siblingOrder === idx && value.rank === normalized) {
+                return;
               }
+              onChange({
+                ...value,
+                siblingOrder: idx,
+                rank: normalized,
+              });
             }}
             placeholder="如：长子、次子"
           />
