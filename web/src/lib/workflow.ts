@@ -14,6 +14,7 @@ import {
   getSourceDaikaoId,
   markDaikaoAdmitPending,
 } from "./daikao";
+import { normalizePeopleRank } from "./people-client";
 import {
   applyPeopleCreate,
   applyPeopleDelete,
@@ -152,7 +153,10 @@ function normalizePayload(
   if (objectType === "branch") {
     return toTraditionalBranchPayload(payload as BranchPayload);
   }
-  return toTraditionalPayload(payload as PeoplePayload);
+  // 先同步排行序号与文案，再转繁体入库
+  return toTraditionalPayload(
+    normalizePeopleRank(payload as PeoplePayload),
+  );
 }
 
 async function addEvent(

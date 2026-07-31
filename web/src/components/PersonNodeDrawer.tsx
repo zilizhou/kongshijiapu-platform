@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { peopleToPayload } from "@/lib/people-client";
+import { normalizePeopleRank, peopleToPayload } from "@/lib/people-client";
 import {
   peopleDataSourceHint,
   peopleDataSourceLabel,
@@ -100,12 +100,13 @@ export function PersonNodeDrawer({
     setSaving(true);
     setError("");
     try {
+      const body = normalizePeopleRank(payload);
       // 已有驳回/暂存单：直接 PATCH 原单，避免另开一张对不上
       const res = resumableRequestId
         ? await fetch(`/api/requests/${resumableRequestId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ payload, submit }),
+            body: JSON.stringify({ payload: body, submit }),
           })
         : await fetch("/api/requests", {
             method: "POST",
@@ -113,7 +114,7 @@ export function PersonNodeDrawer({
             body: JSON.stringify({
               operation: "update",
               objectId: person.id,
-              payload,
+              payload: body,
               submit,
             }),
           });

@@ -12,6 +12,7 @@ import { LineageNode, PeoplePayload, PeopleRow } from "./types";
 export { peopleToPayload };
 import {
   likeOrClause,
+  parseRankToIndex,
   rankLabelTraditional,
   searchTextVariants,
   toTraditional,
@@ -432,16 +433,13 @@ export async function searchPeople(opts: {
     fatherName || grandfatherName || opts.parentId,
   );
 
-  // COUNT / SELECT 共用同一套 JOIN；父系条件已改为 parent_id IN (...)
+  // 仅筛父/祖时才 JOIN relation/sibling_order，避免无筛选时 170 万行 LEFT JOIN 把 COUNT 拖到数秒
   const fromJoins = [
-    hasRelation || needRelationJoin
+    needRelationJoin
       ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
       : "",
-    hasRelation || needSiblingParentJoin
+    needSiblingParentJoin
       ? "LEFT JOIN app_sibling_order so ON so.people_id = p.F_ID"
-      : "",
-    hasRelation
-      ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
       : "",
     needGrandparentJoin
       ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
@@ -464,18 +462,6 @@ export async function searchPeople(opts: {
       .replace(/courtesy\.zi/g, "NULL")
       .replace(/courtesy\.hao/g, "NULL");
   }
-
-  const selectParent = hasRelation
-    ? `COALESCE(NULLIF(r.F_PARENT_ID, 0), so.parent_id) AS F_PARENT_ID,
-            COALESCE(NULLIF(r.F_PARENT_NAME, ''), parent_p.F_NAME) AS F_PARENT_NAME,
-            r.F_FATHER_ID`
-    : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID";
-  const selectChildCount = hasRelation
-    ? "(SELECT COUNT(*) FROM tb_people_relation c WHERE c.F_PARENT_ID = p.F_ID) AS child_count"
-    : `(SELECT COUNT(*) FROM tb_people c
-        WHERE c.F_FLAG = p.F_FLAG
-          AND c.F_LEFT > p.F_LEFT AND c.F_RIGHT < p.F_RIGHT
-          AND c.F_LEVEL = p.F_LEVEL + 1) AS child_count`;
 
   // 审核状态筛选：只保留「最新变更单」匹配的人
   let auditJoin = "";
@@ -519,16 +505,17 @@ export async function searchPeople(opts: {
     ? `ORDER BY (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END), p.F_ID DESC`
     : `ORDER BY p.F_ID ASC`;
 
+  // 列表不联表算父亲/子代数：先取页内行，再批量补全（避免相关子查询 × 页大小）
   const rows = await query<PeopleDb[]>(
     `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
             p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT,
             p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME,
-            ${selectParent},
+            NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID,
             NULL AS F_SPOUSE, NULL AS F_SPOUSE_INFO, NULL AS F_DESCRIPTION, NULL AS F_VOLUME,
             NULL AS F_PHONE, NULL AS F_COMPANY, NULL AS F_POSITION, NULL AS F_PROFESSIONAL_TITLE,
             NULL AS F_COLLEGE, NULL AS F_DEGREE,
-            ${selectChildCount}
+            0 AS child_count
      FROM tb_people p
      ${fromJoins}
      ${courtesyJoin}
@@ -539,8 +526,105 @@ export async function searchPeople(opts: {
     params,
   );
 
-  const items = await attachLatestReviewStatus(rows.map(mapRow));
+  let items = rows.map(mapRow);
+  items = await attachListParentAndChildMeta(items);
+  items = await attachLatestReviewStatus(items);
   return { total, page, pageSize, items };
+}
+
+/** 列表页：批量补全父亲与是否有子代（不拖慢主查询） */
+async function attachListParentAndChildMeta(
+  people: PeopleRow[],
+): Promise<PeopleRow[]> {
+  if (!people.length) return people;
+  const ids = people.map((p) => p.id);
+  const ph = ids.map(() => "?").join(",");
+  const parentById = new Map<
+    number,
+    { parentId: number | null; parentName: string | null; birthFatherId: number | null }
+  >();
+  const childCount = new Map<number, number>();
+
+  try {
+    if (await tableExists("tb_people_relation")) {
+      const rels = await query<RowDataPacket[]>(
+        `SELECT F_PEOPLE_ID AS id, F_PARENT_ID AS parentId, F_PARENT_NAME AS parentName,
+                F_FATHER_ID AS birthFatherId
+         FROM tb_people_relation
+         WHERE F_PEOPLE_ID IN (${ph})`,
+        ids,
+      );
+      for (const r of rels) {
+        parentById.set(Number(r.id), {
+          parentId: Number(r.parentId || 0) || null,
+          parentName: r.parentName ? String(r.parentName) : null,
+          birthFatherId: Number(r.birthFatherId || 0) || null,
+        });
+      }
+      const counts = await query<RowDataPacket[]>(
+        `SELECT F_PARENT_ID AS id, COUNT(*) AS c
+         FROM tb_people_relation
+         WHERE F_PARENT_ID IN (${ph})
+         GROUP BY F_PARENT_ID`,
+        ids,
+      );
+      for (const r of counts) {
+        childCount.set(Number(r.id), Number(r.c || 0));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    await ensureSiblingOrderTable();
+    const missingParent = ids.filter((id) => !parentById.get(id)?.parentId);
+    if (missingParent.length) {
+      const mph = missingParent.map(() => "?").join(",");
+      const soRows = await query<RowDataPacket[]>(
+        `SELECT s.people_id AS id, s.parent_id AS parentId, p.F_NAME AS parentName
+         FROM app_sibling_order s
+         LEFT JOIN tb_people p ON p.F_ID = s.parent_id
+         WHERE s.people_id IN (${mph})`,
+        missingParent,
+      );
+      for (const r of soRows) {
+        const id = Number(r.id);
+        if (parentById.get(id)?.parentId) continue;
+        parentById.set(id, {
+          parentId: Number(r.parentId || 0) || null,
+          parentName: r.parentName ? String(r.parentName) : null,
+          birthFatherId: parentById.get(id)?.birthFatherId ?? null,
+        });
+      }
+    }
+    const soCounts = await query<RowDataPacket[]>(
+      `SELECT parent_id AS id, COUNT(*) AS c
+       FROM app_sibling_order
+       WHERE parent_id IN (${ph})
+       GROUP BY parent_id`,
+      ids,
+    );
+    for (const r of soCounts) {
+      const id = Number(r.id);
+      childCount.set(id, Math.max(childCount.get(id) || 0, Number(r.c || 0)));
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 仍缺父名时用 nested-set 启发式：区间大于 1 视为有子代
+  return people.map((p) => {
+    const meta = parentById.get(p.id);
+    const cc = childCount.get(p.id);
+    return {
+      ...p,
+      parentId: meta?.parentId ?? p.parentId,
+      parentName: meta?.parentName ?? p.parentName,
+      birthFatherId: meta?.birthFatherId ?? p.birthFatherId,
+      childCount: cc != null ? cc : p.childCount,
+    };
+  });
 }
 
 const tableExistsCache = new Map<string, boolean>();
@@ -854,6 +938,10 @@ export async function applySiblingReorder(
   }
 }
 
+/**
+ * 将某人写入/调整到同父兄弟排行中的目标位置，并重写全体 sort_no + rank_label。
+ * 目标序：优先解析排行文案，其次 siblingOrder；皆空则保持原位或追加末尾。
+ */
 async function upsertPersonSiblingMeta(
   conn: PoolConnection,
   peopleId: number,
@@ -862,23 +950,95 @@ async function upsertPersonSiblingMeta(
 ) {
   if (!parentId) return;
   await ensureSiblingOrderTable();
-  let sortNo = payload.siblingOrder;
-  if (sortNo == null) {
+
+  const hasRelation = await tableExists("tb_people_relation");
+  let siblings: { id: number; sex: string }[] = [];
+  if (hasRelation) {
     const [rows] = await conn.query<RowDataPacket[]>(
-      `SELECT COALESCE(MAX(sort_no), -1) AS m FROM app_sibling_order WHERE parent_id = ?`,
+      `SELECT p.F_ID AS id, p.F_SEX AS sex
+       FROM tb_people_relation r
+       JOIN tb_people p ON p.F_ID = r.F_PEOPLE_ID
+       WHERE r.F_PARENT_ID = ?`,
       [parentId],
     );
-    sortNo = Number(rows[0]?.m ?? -1) + 1;
+    siblings = rows.map((r) => ({ id: Number(r.id), sex: String(r.sex) }));
+  } else {
+    const [rows] = await conn.query<RowDataPacket[]>(
+      `SELECT p.F_ID AS id, p.F_SEX AS sex
+       FROM tb_people parent
+       JOIN tb_people p
+         ON p.F_FLAG = parent.F_FLAG
+        AND p.F_LEFT > parent.F_LEFT
+        AND p.F_RIGHT < parent.F_RIGHT
+        AND p.F_LEVEL = parent.F_LEVEL + 1
+       WHERE parent.F_ID = ?`,
+      [parentId],
+    );
+    siblings = rows.map((r) => ({ id: Number(r.id), sex: String(r.sex) }));
   }
-  const rank =
-    toTraditional(payload.rank || "") ||
-    rankLabelTraditional(payload.sex, sortNo);
-  await conn.execute(
-    `INSERT INTO app_sibling_order (people_id, parent_id, sort_no, rank_label)
-     VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE parent_id=VALUES(parent_id), sort_no=VALUES(sort_no), rank_label=VALUES(rank_label)`,
-    [peopleId, parentId, sortNo, rank],
+
+  // 兼收 sibling_order 中已挂靠、但 relation 暂缺的兄弟
+  const [soSiblings] = await conn.query<RowDataPacket[]>(
+    `SELECT s.people_id AS id, p.F_SEX AS sex
+     FROM app_sibling_order s
+     JOIN tb_people p ON p.F_ID = s.people_id
+     WHERE s.parent_id = ?`,
+    [parentId],
   );
+  for (const r of soSiblings) {
+    const id = Number(r.id);
+    if (!siblings.some((s) => s.id === id)) {
+      siblings.push({ id, sex: String(r.sex || "男") });
+    }
+  }
+
+  if (!siblings.some((s) => s.id === peopleId)) {
+    siblings.push({
+      id: peopleId,
+      sex: payload.sex === "女" ? "女" : "男",
+    });
+  }
+
+  const meta = await loadSiblingMeta(siblings.map((s) => s.id));
+  let order = sortByBirthOrder(
+    siblings.map((s) => ({
+      id: s.id,
+      no: null as string | null,
+      siblingOrder: meta.get(s.id)?.sortNo ?? null,
+    })),
+  ).map((s) => s.id);
+
+  if (!order.includes(peopleId)) order.push(peopleId);
+
+  const parsed = parseRankToIndex(payload.rank || "");
+  let targetSort =
+    parsed != null
+      ? parsed
+      : payload.siblingOrder != null
+        ? Number(payload.siblingOrder)
+        : order.indexOf(peopleId);
+  if (!Number.isFinite(targetSort) || targetSort < 0) {
+    targetSort = order.length - 1;
+  }
+  targetSort = Math.max(0, Math.min(Math.floor(targetSort), order.length - 1));
+
+  order = order.filter((id) => id !== peopleId);
+  order.splice(targetSort, 0, peopleId);
+
+  const sexMap = new Map(siblings.map((s) => [s.id, s.sex]));
+  sexMap.set(peopleId, payload.sex === "女" ? "女" : "男");
+
+  for (let i = 0; i < order.length; i++) {
+    const id = order[i];
+    const sex = sexMap.get(id) || "男";
+    const rank = rankLabelTraditional(sex, i);
+    await conn.execute(
+      `INSERT INTO app_sibling_order (people_id, parent_id, sort_no, rank_label)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE parent_id=VALUES(parent_id), sort_no=VALUES(sort_no), rank_label=VALUES(rank_label)`,
+      [id, parentId, i, rank],
+    );
+  }
 }
 
 /** relation 表未导入时，用同 F_FLAG 的 nested-set 推断直接父 */
@@ -955,8 +1115,8 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
         person.parentName = parent.name;
       }
     }
-    // 仅查排行元数据，避免 getChildren 拉全量兄弟拖慢详情/世系
-    if ((!person.rank || person.siblingOrder == null) && person.parentId) {
+    // 排行以 app_sibling_order 为准（覆盖可能过期的展示字段）
+    if (person.parentId) {
       try {
         await ensureSiblingOrderTable();
         const so = await query<RowDataPacket[]>(
@@ -965,10 +1125,8 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
           { id },
         );
         if (so[0]) {
-          person.siblingOrder =
-            person.siblingOrder ?? Number(so[0].sort_no);
+          person.siblingOrder = Number(so[0].sort_no);
           person.rank =
-            person.rank ||
             String(so[0].rank_label || "") ||
             rankLabelTraditional(person.sex, Number(so[0].sort_no) || 0);
         }
@@ -2253,7 +2411,9 @@ async function batchChildrenByParents(
   }
 
   for (const [pid, arr] of map) {
-    map.set(pid, sortByBirthOrder(arr));
+    if (!arr.length) continue;
+    const attached = await attachSiblingMeta(arr);
+    map.set(pid, annotateRanks(sortByBirthOrder(attached)));
   }
   return map;
 }
@@ -2348,12 +2508,25 @@ async function fetchLineageFlatLite(
      LIMIT ${LINEAGE_DESCENDANT_ROW_LIMIT}`,
     { l: bounds.l, r: bounds.r, maxLevel, flag: bounds.flag },
   );
-  const flat: FlatNode[] = rows.map((r) => ({
+  const mapped: FlatNode[] = rows.map((r) => ({
     ...mapRow(r),
     left: Number(r._left),
     right: Number(r._right),
   }));
-  return { bounds, flat };
+  try {
+    const attached = await attachSiblingMeta(mapped);
+    return {
+      bounds,
+      flat: attached.map((p, i) => ({
+        ...p,
+        left: mapped[i].left,
+        right: mapped[i].right,
+      })),
+    };
+  } catch {
+    // app_sibling_order 未就绪时忽略
+  }
+  return { bounds, flat: mapped };
 }
 
 /**
@@ -2417,18 +2590,28 @@ export async function getLineageTree(
       for (const pid of uniqParents) {
         const parentNode = findLineageNode(tree, pid);
         if (!parentNode) continue;
-        const have = new Set(parentNode.children.map((c) => c.id));
         const kids = kidsMap.get(pid) || [];
+        // 以 app_sibling_order 为准重排已有子节点，并补全缺失兄弟
+        const byId = new Map(parentNode.children.map((c) => [c.id, c]));
+        const next: LineageNode[] = [];
+        const seen = new Set<number>();
         kids.forEach((k, idx) => {
-          if (have.has(k.id) || Number(k.level ?? 0) > maxLevel) return;
-          if (relatedIds.size >= LINEAGE_NODE_BUDGET) return;
-          const leaf = toLineageNode(k);
-          leaf.rank = k.rank || rankLabelTraditional(k.sex, idx);
-          parentNode.children.push(leaf);
-          relatedIds.add(k.id);
-          have.add(k.id);
-          if (Number(k.level ?? 0) < maxLevel) missingIds.push(k.id);
+          if (Number(k.level ?? 0) > maxLevel) return;
+          let child = byId.get(k.id);
+          if (!child) {
+            if (relatedIds.size >= LINEAGE_NODE_BUDGET) return;
+            child = toLineageNode(k);
+            relatedIds.add(k.id);
+            if (Number(k.level ?? 0) < maxLevel) missingIds.push(k.id);
+          }
+          child.rank = k.rank || rankLabelTraditional(k.sex, idx);
+          next.push(child);
+          seen.add(k.id);
         });
+        for (const c of parentNode.children) {
+          if (!seen.has(c.id)) next.push(c);
+        }
+        parentNode.children = next;
       }
       // 旁系再向下扩一层
       if (missingIds.length && relatedIds.size < LINEAGE_NODE_BUDGET) {

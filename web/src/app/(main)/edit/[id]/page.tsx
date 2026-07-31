@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { BranchForm, emptyBranchPayload } from "@/components/BranchForm";
 import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
 import { Button, Card, StatusPill } from "@/components/ui";
+import { normalizePeopleRank } from "@/lib/people-client";
 import {
   BranchPayload,
   ChangePayload,
@@ -134,10 +135,14 @@ export default function EditDetailPage() {
     setSaving(true);
     setError("");
     try {
+      const body =
+        item.objectType === "people"
+          ? normalizePeopleRank(payload as PeoplePayload)
+          : payload;
       const res = await fetch(`/api/requests/${params.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload, submit }),
+        body: JSON.stringify({ payload: body, submit }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "保存失败");

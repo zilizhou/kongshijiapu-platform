@@ -1,5 +1,19 @@
 import { extractCourtesyFromDescription } from "./courtesy";
 import type { PeoplePayload, PeopleRow } from "./types";
+import { parseRankToIndex, rankLabelSimplified } from "./zh";
+
+/** 提交前统一排行：文案与序号互相同步，避免只改文案却带上旧 siblingOrder */
+export function normalizePeopleRank(payload: PeoplePayload): PeoplePayload {
+  const sex = payload.sex === "女" ? "女" : "男";
+  const parsed = parseRankToIndex(payload.rank || "");
+  const idx = parsed ?? payload.siblingOrder;
+  if (idx == null || !Number.isFinite(idx) || idx < 0) return payload;
+  return {
+    ...payload,
+    siblingOrder: Math.floor(idx),
+    rank: rankLabelSimplified(sex, Math.floor(idx)),
+  };
+}
 
 /** 从别名串里去掉已结构化的字/号，避免表单重复 */
 function stripCourtesyFromAlias(

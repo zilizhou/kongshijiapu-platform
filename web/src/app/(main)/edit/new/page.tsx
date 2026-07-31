@@ -6,7 +6,7 @@ import { Suspense, useEffect, useState } from "react";
 import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
 import { PeopleListBackLink } from "@/components/PeopleListBackLink";
 import { Button, Card } from "@/components/ui";
-import { peopleToPayload } from "@/lib/people-client";
+import { normalizePeopleRank, peopleToPayload } from "@/lib/people-client";
 import { PeoplePayload, PeopleRow } from "@/lib/types";
 
 function rowToPayload(p: PeopleRow): PeoplePayload {
@@ -120,7 +120,7 @@ function NewEditInner() {
         body: JSON.stringify({
           operation: op === "update" ? "update" : "create",
           objectId: op === "update" ? objectId : null,
-          payload,
+          payload: normalizePeopleRank(payload),
           submit,
         }),
       });
