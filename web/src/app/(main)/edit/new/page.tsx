@@ -217,33 +217,44 @@ function NewEditInner() {
               <PeopleForm value={payload} onChange={setPayload} />
             </>
           )}
-          {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}
         </div>
 
-        <div className="flex flex-wrap justify-end gap-2 border-t border-line bg-soft/40 px-5 py-4">
-          {isAdmit ? (
-            <Link href="/daikao">
-              <Button variant="secondary" disabled={saving}>
-                取消
-              </Button>
-            </Link>
-          ) : (
-            <PeopleListBackLink>
-              <Button variant="secondary" disabled={saving}>
-                取消
-              </Button>
-            </PeopleListBackLink>
-          )}
-          <Button
-            disabled={saving || loading}
-            variant="secondary"
-            onClick={() => save(false)}
-          >
-            暂存
-          </Button>
-          <Button disabled={saving || loading} onClick={() => save(true)}>
-            确认提交
-          </Button>
+        <div className="border-t border-line bg-soft/40 px-5 py-4">
+          {error ? (
+            <p className="mb-3 text-sm text-danger">{error}</p>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            {isAdmit ? (
+              <Link href="/daikao">
+                <Button type="button" variant="secondary" disabled={saving}>
+                  取消
+                </Button>
+              </Link>
+            ) : (
+              <PeopleListBackLink>
+                <Button type="button" variant="secondary" disabled={saving}>
+                  取消
+                </Button>
+              </PeopleListBackLink>
+            )}
+            <Button
+              type="button"
+              disabled={saving || loading}
+              variant="secondary"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => save(false)}
+            >
+              暂存
+            </Button>
+            <Button
+              type="button"
+              disabled={saving || loading}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => save(true)}
+            >
+              确认提交
+            </Button>
+          </div>
         </div>
       </Card>
     </div>
