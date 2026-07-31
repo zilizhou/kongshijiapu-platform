@@ -583,8 +583,14 @@ export default function DaikaoPage() {
       </Card>
 
       {detail && form ? (
-        <div className="fixed inset-0 z-40 flex justify-end bg-black/30">
-          <div className="flex h-full w-full max-w-xl flex-col bg-panel shadow-xl">
+        <div
+          className="fixed inset-0 z-40 flex justify-end bg-black/30"
+          onClick={closeDetail}
+        >
+          <div
+            className="flex h-full w-full max-w-xl flex-col bg-panel shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-line px-4 py-3">
               <div>
                 <div className="font-display text-lg text-ink">
