@@ -203,7 +203,7 @@ export function RegionCascader({
     const hits = searchRegions(text, 1);
     const best = hits[0];
     if (best && (text.includes(best.province) || text.includes(best.city) || text.includes(best.district))) {
-      let extra = text
+      const extra = text
         .replace(best.province, " ")
         .replace(best.city, " ")
         .replace(best.district, " ")
