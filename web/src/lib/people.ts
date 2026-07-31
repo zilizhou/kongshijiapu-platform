@@ -1563,9 +1563,15 @@ async function upsertPeopleRelationParent(
   );
 }
 
-/** 补齐：有排行父或审单父、但缺 relation 的平台成员 */
-export async function repairMissingParentRelations() {
+let relationRepairAt = 0;
+
+/** 补齐：有排行父、但缺 relation 的成员（进程内最多约每小时一次） */
+export async function repairMissingParentRelations(force = false) {
   if (!(await tableExists("tb_people_relation"))) return { fixed: 0 };
+  if (!force && Date.now() - relationRepairAt < 60 * 60 * 1000) {
+    return { fixed: 0, skipped: true as const };
+  }
+  relationRepairAt = Date.now();
   await ensureSiblingOrderTable();
   // F_PARENT_NAME/NO 仅 varchar(10)/pinyin(50)，需截断以免整批插入失败
   const result = await execute(
