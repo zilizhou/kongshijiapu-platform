@@ -5,6 +5,10 @@ import { extractCourtesyFromDescription } from "@/lib/courtesy";
 import { formatBeforeValue, isFieldChanged } from "@/lib/diff";
 import { PeoplePayload } from "@/lib/types";
 import { nameToPinyin } from "@/lib/pinyin";
+import {
+  parseRankToIndex,
+  rankLabelSimplified,
+} from "@/lib/zh";
 import { FlexibleDateField } from "./FlexibleDateField";
 import { BranchPicker } from "./BranchPicker";
 import { PersonPicker } from "./PersonPicker";
@@ -159,7 +163,21 @@ export function PeopleForm({
         <RadioGroup
           disabled={disabled}
           value={value.sex || "男"}
-          onChange={(v) => set("sex", v as "男" | "女")}
+          onChange={(v) => {
+            const sex = v as "男" | "女";
+            const idx =
+              value.siblingOrder ?? parseRankToIndex(value.rank || "");
+            if (idx != null) {
+              onChange({
+                ...value,
+                sex,
+                siblingOrder: idx,
+                rank: rankLabelSimplified(sex, idx),
+              });
+            } else {
+              set("sex", sex);
+            }
+          }}
           options={[
             { value: "男", label: "男" },
             { value: "女", label: "女" },
@@ -185,12 +203,76 @@ export function PeopleForm({
       </Field>
 
       <Field label="当前排行" required {...mark("rank")}>
-        <Input
-          disabled={disabled}
-          value={value.rank || ""}
-          onChange={(e) => set("rank", e.target.value)}
-          placeholder="如：长子、次子（也可在世系图拖拽调整）"
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            disabled={disabled}
+            type="number"
+            min={1}
+            className="w-[88px]"
+            value={
+              value.siblingOrder != null
+                ? value.siblingOrder + 1
+                : (() => {
+                    const idx = parseRankToIndex(value.rank || "");
+                    return idx != null ? idx + 1 : "";
+                  })()
+            }
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") {
+                onChange({ ...value, rank: "", siblingOrder: null });
+                return;
+              }
+              const n = Number(raw);
+              if (!Number.isFinite(n) || n < 1) return;
+              const idx = Math.floor(n) - 1;
+              const sex = value.sex === "女" ? "女" : "男";
+              onChange({
+                ...value,
+                siblingOrder: idx,
+                rank: rankLabelSimplified(sex, idx),
+              });
+            }}
+            placeholder="序号"
+            title="1=长子/长女，2=次子/次女…"
+          />
+          <span className="text-xs text-muted">↔</span>
+          <Input
+            disabled={disabled}
+            className="min-w-[140px] flex-1"
+            value={value.rank || ""}
+            onChange={(e) => {
+              const rank = e.target.value;
+              const idx = parseRankToIndex(rank);
+              if (idx != null) {
+                onChange({ ...value, rank, siblingOrder: idx });
+              } else {
+                onChange({ ...value, rank, siblingOrder: null });
+              }
+            }}
+            onBlur={() => {
+              const idx =
+                value.siblingOrder ?? parseRankToIndex(value.rank || "");
+              if (idx == null) return;
+              const sex = value.sex === "女" ? "女" : "男";
+              const normalized = rankLabelSimplified(sex, idx);
+              if (
+                value.rank !== normalized ||
+                value.siblingOrder !== idx
+              ) {
+                onChange({
+                  ...value,
+                  siblingOrder: idx,
+                  rank: normalized,
+                });
+              }
+            }}
+            placeholder="如：长子、次子"
+          />
+        </div>
+        <p className="mt-1 text-xs text-muted">
+          输入数字或排行会互相换算：1↔长子/长女，2↔次子/次女（也可在世系图拖拽调整）
+        </p>
       </Field>
       <Field label="世代" {...mark("level")}>
         <Input

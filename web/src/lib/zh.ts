@@ -108,9 +108,54 @@ export function toTraditionalBranchPayload(
   return out;
 }
 
-/** 排行标签（繁体）：長子/次子/三子… 或 長女/次女… */
+const RANK_HEADS_TRAD = ["長", "次", "三", "四", "五", "六", "七", "八", "九", "十"];
+const RANK_HEADS_SIMP = ["长", "次", "三", "四", "五", "六", "七", "八", "九", "十"];
+
+/** 排行标签（繁体）：長子/次子/三子… 或 長女/次女…；index 从 0 起 */
 export function rankLabelTraditional(sex: string, index: number): string {
-  const heads = ["長", "次", "三", "四", "五", "六", "七", "八", "九", "十"];
-  const head = heads[index] || String(index + 1);
+  const head = RANK_HEADS_TRAD[index] || String(index + 1);
   return `${head}${sex === "女" ? "女" : "子"}`;
+}
+
+/** 排行标签（简体，表单展示用）；index 从 0 起 */
+export function rankLabelSimplified(sex: string, index: number): string {
+  const head = RANK_HEADS_SIMP[index] || String(index + 1);
+  return `${head}${sex === "女" ? "女" : "子"}`;
+}
+
+/**
+ * 解析排行文案或序号为 0 起下标。
+ * 支持：1 / 2、长子/次子/三女、長子、二子 等。
+ */
+export function parseRankToIndex(input: string): number | null {
+  const raw = (input || "").trim();
+  if (!raw) return null;
+  if (/^\d+$/.test(raw)) {
+    const n = Number(raw);
+    return n >= 1 ? n - 1 : null;
+  }
+  const t = toTraditional(raw).replace(/^第/, "");
+  const headMap: Record<string, number> = {
+    長: 0,
+    元: 0,
+    孟: 0,
+    次: 1,
+    二: 1,
+    三: 2,
+    四: 3,
+    五: 4,
+    六: 5,
+    七: 6,
+    八: 7,
+    九: 8,
+    十: 9,
+  };
+  const m = t.match(/^(長|元|孟|次|二|三|四|五|六|七|八|九|十)([子女])?$/);
+  if (m && headMap[m[1]] != null) return headMap[m[1]];
+  const mNum = t.match(/^(\d+)([子女])?$/);
+  if (mNum) {
+    const n = Number(mNum[1]);
+    return n >= 1 ? n - 1 : null;
+  }
+  return null;
 }
