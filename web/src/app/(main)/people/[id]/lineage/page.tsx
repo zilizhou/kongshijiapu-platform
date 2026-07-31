@@ -174,6 +174,9 @@ function PersonCard({
   );
 }
 
+/** 同父兄弟超过此数时先折叠，点击再展开，避免断代挂靠等场景一次铺开过多子代 */
+const SIBLING_VISIBLE_LIMIT = 20;
+
 function TreeBranch({
   node,
   focusId,
@@ -197,12 +200,36 @@ function TreeBranch({
   const dragId = useRef<number | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
   const suppressClick = useRef(false);
+  const overflow = kids.length > SIBLING_VISIBLE_LIMIT;
+  const needFocusExpand = kids
+    .slice(SIBLING_VISIBLE_LIMIT)
+    .some(
+      (c) =>
+        c.id === focusId ||
+        (!c.pending && reviewingIds.has(c.id)) ||
+        lineageContainsId(c, focusId),
+    );
+  const [siblingsExpanded, setSiblingsExpanded] = useState(needFocusExpand);
   const realKids = kids.filter((c) => !c.pending);
-  const canDrag = canEdit && !node.pending && realKids.length > 1;
+  const canDrag =
+    canEdit &&
+    !node.pending &&
+    realKids.length > 1 &&
+    (!overflow || siblingsExpanded);
 
   useEffect(() => {
     setKids(node.children);
   }, [node.children]);
+
+  useEffect(() => {
+    if (needFocusExpand) setSiblingsExpanded(true);
+  }, [needFocusExpand]);
+
+  const visibleKids =
+    overflow && !siblingsExpanded
+      ? kids.slice(0, SIBLING_VISIBLE_LIMIT)
+      : kids;
+  const hiddenCount = kids.length - visibleKids.length;
 
   function moveBefore(fromId: number, toId: number) {
     if (fromId === toId || fromId < 0 || toId < 0) return;
@@ -240,7 +267,7 @@ function TreeBranch({
         <>
           <div className="my-2 h-5 w-0.5 bg-[#8a9bb0]" />
           <div className="lineage-sibs">
-            {kids.map((c, idx) => {
+            {visibleKids.map((c, idx) => {
               const draggable = canDrag && !c.pending;
               return (
               <div
@@ -307,11 +334,38 @@ function TreeBranch({
               </div>
             );
             })}
+            {overflow ? (
+              <div className="lineage-sib flex flex-col items-center">
+                <div className="mb-1 text-[10px] text-muted">其余</div>
+                <button
+                  type="button"
+                  className="inline-flex min-w-[92px] flex-col items-center rounded-lg border-2 border-dashed border-[#8a9bb0] bg-white px-3 py-2 text-center text-[#5c6570] transition hover:border-accent hover:text-accent"
+                  title={
+                    siblingsExpanded
+                      ? "收起多余子代，减轻画面负担"
+                      : `还有 ${hiddenCount} 位子代未显示，点击展开`
+                  }
+                  onClick={() => setSiblingsExpanded((v) => !v)}
+                >
+                  <span className="font-display text-base">
+                    {siblingsExpanded ? "收起" : `展开其余 ${hiddenCount} 人`}
+                  </span>
+                  <span className="mt-0.5 text-[11px] text-muted">
+                    共 {kids.length} 子代
+                  </span>
+                </button>
+              </div>
+            ) : null}
           </div>
         </>
       ) : null}
     </div>
   );
+}
+
+function lineageContainsId(node: LineageNode, id: number): boolean {
+  if (node.id === id) return true;
+  return node.children.some((c) => lineageContainsId(c, id));
 }
 
 function LineageInner() {
@@ -651,7 +705,7 @@ function LineageInner() {
             </div>
 
             <div className="mt-8 text-center text-xs text-muted">
-              宽谱展示：各代同父兄弟及其分支一并画出 · 可滚动 · 右上角可缩放 · 金色为当前人物
+              宽谱展示：各代同父兄弟及其分支一并画出 · 同父超过 20 子代可点「展开其余」· 可滚动缩放 · 金色为当前人物
             </div>
           </ChartZoomViewport>
         </Card>
