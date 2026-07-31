@@ -74,8 +74,8 @@ function Stepper({
 function YiziInner() {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
-  const initUp = Math.min(20, Math.max(0, Number(search.get("up") || 5)));
-  const initDown = Math.min(20, Math.max(0, Number(search.get("down") || 5)));
+  const initUp = Math.min(20, Math.max(0, Number(search.get("up") || 1)));
+  const initDown = Math.min(20, Math.max(0, Number(search.get("down") || 1)));
   const [up, setUp] = useState(initUp);
   const [down, setDown] = useState(initDown);
   const [queryUp, setQueryUp] = useState(initUp);

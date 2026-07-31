@@ -2916,8 +2916,8 @@ export async function getYiziLine(
   id: number,
   opts?: { up?: number; down?: number },
 ): Promise<YiziPayload | null> {
-  const up = Math.min(20, Math.max(0, opts?.up ?? 5));
-  const down = Math.min(20, Math.max(0, opts?.down ?? 5));
+  const up = Math.min(20, Math.max(0, opts?.up ?? 1));
+  const down = Math.min(20, Math.max(0, opts?.down ?? 1));
   const cacheKey = `${id}:${up}:${down}`;
   const hit = yiziCache.get(cacheKey);
   if (hit && Date.now() - hit.at < 60_000) return hit.data;
