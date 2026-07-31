@@ -239,7 +239,7 @@ export async function searchPeople(opts: {
   const keyword = opts.q?.trim() || "";
 
   if (opts.parentId) {
-    where.push("r.F_PARENT_ID = :parentId");
+    where.push("(r.F_PARENT_ID = :parentId OR so.parent_id = :parentId)");
     params.parentId = opts.parentId;
   }
   if (opts.name) {
@@ -263,27 +263,39 @@ export async function searchPeople(opts: {
     }
   }
   if (fatherName) {
-    // 汉字名（冗余父名 / 现名）或父亲拼音
-    where.push(
-      nameOrPinyinClause(
-        ["r.F_PARENT_NAME", "parent_p.F_NAME"],
-        "parent_p.F_PINYIN",
-        fatherName,
-        "fatherName",
-        params,
-      ),
+    // relation 父名/现名/拼音，或排行表父（补 relation 缺失时仍可命中）
+    const byRelation = nameOrPinyinClause(
+      ["r.F_PARENT_NAME", "parent_p.F_NAME"],
+      "parent_p.F_PINYIN",
+      fatherName,
+      "fatherName",
+      params,
     );
+    const bySibling = nameOrPinyinClause(
+      ["so_parent.F_NAME"],
+      "so_parent.F_PINYIN",
+      fatherName,
+      "fatherNameSo",
+      params,
+    );
+    where.push(`((${byRelation}) OR (${bySibling}))`);
   }
   if (grandfatherName) {
-    where.push(
-      nameOrPinyinClause(
-        ["gp.F_PARENT_NAME", "grandpa_p.F_NAME"],
-        "grandpa_p.F_PINYIN",
-        grandfatherName,
-        "grandfatherName",
-        params,
-      ),
+    const byRelation = nameOrPinyinClause(
+      ["gp.F_PARENT_NAME", "grandpa_p.F_NAME"],
+      "grandpa_p.F_PINYIN",
+      grandfatherName,
+      "grandfatherName",
+      params,
     );
+    const bySibling = nameOrPinyinClause(
+      ["so_gp.F_NAME"],
+      "so_gp.F_PINYIN",
+      grandfatherName,
+      "grandfatherNameSo",
+      params,
+    );
+    where.push(`((${byRelation}) OR (${bySibling}))`);
   }
   if (pinyin) {
     where.push(pinyinLikeClause("p.F_PINYIN", pinyin, "pinyin", params));
@@ -359,6 +371,15 @@ export async function searchPeople(opts: {
     return { total: 0, page, pageSize, items: [] };
   }
 
+  // 父亲检索前补齐缺 relation 的排行父子，避免终审新人「按父查不到」
+  if (hasRelation && (fatherName || opts.parentId)) {
+    try {
+      await repairMissingParentRelations();
+    } catch {
+      /* ignore */
+    }
+  }
+
   let needCourtesy = false;
   if (ziHao || keyword) {
     await ensureCourtesyTable();
@@ -369,11 +390,17 @@ export async function searchPeople(opts: {
   // 列表不 JOIN info：导入期 tb_people_info 写入很重，联表会拖到数秒～超时。
   // 详情抽屉走 getPeopleById。
   // COUNT 勿无谓 JOIN relation：170 万行 LEFT JOIN 计数可达数秒；仅筛父系时才需要。
+  if (hasRelation || fatherName || grandfatherName || opts.parentId) {
+    await ensureSiblingOrderTable();
+  }
   const needRelationJoin =
     hasRelation &&
     Boolean(opts.parentId || fatherName || grandfatherName);
   const needParentPeopleJoin = hasRelation && Boolean(fatherName);
   const needGrandparentJoin = hasRelation && Boolean(grandfatherName);
+  const needSiblingParentJoin = Boolean(
+    fatherName || grandfatherName || opts.parentId,
+  );
 
   const relationJoins = [
     needRelationJoin || needParentPeopleJoin || needGrandparentJoin
@@ -382,26 +409,41 @@ export async function searchPeople(opts: {
     needParentPeopleJoin || needGrandparentJoin
       ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = r.F_PARENT_ID"
       : "",
+    needSiblingParentJoin
+      ? "LEFT JOIN app_sibling_order so ON so.people_id = p.F_ID"
+      : "",
+    fatherName
+      ? "LEFT JOIN tb_people so_parent ON so_parent.F_ID = so.parent_id"
+      : "",
     needGrandparentJoin
-      ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = r.F_PARENT_ID"
+      ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
       : "",
     needGrandparentJoin
       ? "LEFT JOIN tb_people grandpa_p ON grandpa_p.F_ID = gp.F_PARENT_ID"
+      : "",
+    grandfatherName
+      ? "LEFT JOIN app_sibling_order so_parent_meta ON so_parent_meta.people_id = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
+      : "",
+    grandfatherName
+      ? "LEFT JOIN tb_people so_gp ON so_gp.F_ID = so_parent_meta.parent_id"
       : "",
   ]
     .filter(Boolean)
     .join("\n     ");
 
-  // SELECT 路径始终带 relation（有表时），以便列表展示父名
+  // SELECT 路径始终带 relation（有表时），以便列表展示父名；父名优先 relation，其次排行表父
   const joinRelationForSelect = hasRelation
     ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
     : "";
   const parentGrandJoinsForSelect = [
-    needParentPeopleJoin || needGrandparentJoin
-      ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = r.F_PARENT_ID"
+    hasRelation
+      ? "LEFT JOIN app_sibling_order so_sel ON so_sel.people_id = p.F_ID"
+      : "",
+    hasRelation
+      ? "LEFT JOIN tb_people parent_p ON parent_p.F_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so_sel.parent_id)"
       : "",
     needGrandparentJoin
-      ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = r.F_PARENT_ID"
+      ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so_sel.parent_id)"
       : "",
     needGrandparentJoin
       ? "LEFT JOIN tb_people grandpa_p ON grandpa_p.F_ID = gp.F_PARENT_ID"
@@ -423,7 +465,9 @@ export async function searchPeople(opts: {
   }
 
   const selectParent = hasRelation
-    ? "r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID"
+    ? `COALESCE(NULLIF(r.F_PARENT_ID, 0), so_sel.parent_id) AS F_PARENT_ID,
+            COALESCE(NULLIF(r.F_PARENT_NAME, ''), parent_p.F_NAME) AS F_PARENT_NAME,
+            r.F_FATHER_ID`
     : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID";
   const selectChildCount = hasRelation
     ? "(SELECT COUNT(*) FROM tb_people_relation c WHERE c.F_PARENT_ID = p.F_ID) AS child_count"
@@ -1180,12 +1224,12 @@ async function applyPeopleCreateAsParent(
 
   await ensureSiblingOrderTable();
   if (await tableExists("tb_people_relation")) {
-    await conn.execute(
-      `UPDATE tb_people_relation
-       SET F_PARENT_ID = ?, F_PARENT_NAME = ?, F_PARENT_NO = ?
-       WHERE F_PEOPLE_ID = ?`,
-      [id, payload.name, payload.no || "", childId],
-    );
+    await upsertPeopleRelationParent(conn, {
+      peopleId: childId,
+      parentId: id,
+      parentName: payload.name,
+      parentNo: payload.no || "",
+    });
   }
   await conn.execute(
     `UPDATE app_sibling_order SET parent_id = ? WHERE people_id = ?`,
@@ -1285,20 +1329,15 @@ async function insertPeopleRow(
     );
   }
 
-  if (await tableExists("tb_people_relation")) {
-    await conn.execute(
-      `INSERT INTO tb_people_relation
-        (F_PEOPLE_ID, F_FATHER, F_PARENT_ID, F_PARENT_NAME, F_PARENT_NO, F_FATHER_ID, F_FATHER_NO, F_PINYIN)
-       VALUES (?, '', ?, ?, ?, ?, '', ?)`,
-      [
-        id,
-        opts.parentId,
-        opts.parentName,
-        opts.parentNo,
-        payload.birthFatherId || 0,
-        payload.pinyin || "",
-      ],
-    );
+  if (opts.parentId && (await tableExists("tb_people_relation"))) {
+    await upsertPeopleRelationParent(conn, {
+      peopleId: id,
+      parentId: opts.parentId,
+      parentName: opts.parentName,
+      parentNo: opts.parentNo,
+      birthFatherId: payload.birthFatherId || 0,
+      pinyin: payload.pinyin || "",
+    });
   }
 
   if (await tableExists("tb_people_ext")) {
@@ -1374,27 +1413,44 @@ export async function applyPeopleUpdate(
       id,
     ],
   );
-  await conn.execute(
-    `UPDATE tb_people_relation
-     SET F_PINYIN = ?, F_FATHER_ID = ?
-     WHERE F_PEOPLE_ID = ?`,
-    [payload.pinyin || "", payload.birthFatherId || 0, id],
-  );
+  // 同步父子关系到 relation（缺行则插入；改父也要写 F_PARENT_*）
+  let pid = payload.parentId ? Number(payload.parentId) : null;
+  if (!pid && (await tableExists("tb_people_relation"))) {
+    const [rels] = await conn.query<RowDataPacket[]>(
+      `SELECT F_PARENT_ID FROM tb_people_relation WHERE F_PEOPLE_ID = ? LIMIT 1`,
+      [id],
+    );
+    pid = Number(rels[0]?.F_PARENT_ID || 0) || null;
+  }
+  if (!pid) {
+    await ensureSiblingOrderTable();
+    const [so] = await conn.query<RowDataPacket[]>(
+      `SELECT parent_id FROM app_sibling_order WHERE people_id = ? LIMIT 1`,
+      [id],
+    );
+    pid = Number(so[0]?.parent_id || 0) || null;
+  }
 
-  if (payload.rank || payload.siblingOrder != null || payload.parentId) {
-    let pid = payload.parentId || null;
-    if (!pid && (await tableExists("tb_people_relation"))) {
-      const [rels] = await conn.query<RowDataPacket[]>(
-        `SELECT F_PARENT_ID FROM tb_people_relation WHERE F_PEOPLE_ID = ? LIMIT 1`,
-        [id],
-      );
-      pid = Number(rels[0]?.F_PARENT_ID || 0) || null;
-    }
-    if (pid) {
-      await upsertPersonSiblingMeta(conn, id, pid, payload);
-      if (await tableExists("tb_people_relation")) {
-        await refreshParentChildren(conn, pid);
-      }
+  if (pid && (await tableExists("tb_people_relation"))) {
+    await upsertPeopleRelationParent(conn, {
+      peopleId: id,
+      parentId: pid,
+      birthFatherId: payload.birthFatherId || 0,
+      pinyin: payload.pinyin || "",
+    });
+  } else if (await tableExists("tb_people_relation")) {
+    await conn.execute(
+      `UPDATE tb_people_relation
+       SET F_PINYIN = ?, F_FATHER_ID = ?
+       WHERE F_PEOPLE_ID = ?`,
+      [payload.pinyin || "", payload.birthFatherId || 0, id],
+    );
+  }
+
+  if (pid && (payload.rank || payload.siblingOrder != null || payload.parentId)) {
+    await upsertPersonSiblingMeta(conn, id, pid, payload);
+    if (await tableExists("tb_people_relation")) {
+      await refreshParentChildren(conn, pid);
     }
   }
 
@@ -1460,6 +1516,70 @@ export async function applyPeopleDelete(conn: PoolConnection, id: number) {
   if (node.F_PARENT_ID) {
     await refreshParentChildren(conn, node.F_PARENT_ID);
   }
+}
+
+/** 写入/补齐父子关系到 tb_people_relation（父亲检索依赖此表） */
+async function upsertPeopleRelationParent(
+  conn: PoolConnection,
+  opts: {
+    peopleId: number;
+    parentId: number;
+    parentName?: string;
+    parentNo?: string;
+    birthFatherId?: number;
+    pinyin?: string;
+  },
+) {
+  if (!(await tableExists("tb_people_relation"))) return;
+  let parentName = opts.parentName || "";
+  let parentNo = opts.parentNo || "";
+  if (!parentName) {
+    const [parents] = await conn.query<
+      (RowDataPacket & { F_NAME: string; F_NO: string | null })[]
+    >(`SELECT F_NAME, F_NO FROM tb_people WHERE F_ID = ? LIMIT 1`, [
+      opts.parentId,
+    ]);
+    parentName = parents[0]?.F_NAME || "";
+    parentNo = parents[0]?.F_NO || "";
+  }
+  await conn.execute(
+    `INSERT INTO tb_people_relation
+      (F_PEOPLE_ID, F_FATHER, F_PARENT_ID, F_PARENT_NAME, F_PARENT_NO, F_FATHER_ID, F_FATHER_NO, F_PINYIN)
+     VALUES (?, '', ?, ?, ?, ?, '', ?)
+     ON DUPLICATE KEY UPDATE
+       F_PARENT_ID = VALUES(F_PARENT_ID),
+       F_PARENT_NAME = VALUES(F_PARENT_NAME),
+       F_PARENT_NO = VALUES(F_PARENT_NO),
+       F_FATHER_ID = VALUES(F_FATHER_ID),
+       F_PINYIN = VALUES(F_PINYIN)`,
+    [
+      opts.peopleId,
+      opts.parentId,
+      parentName,
+      parentNo,
+      opts.birthFatherId || 0,
+      opts.pinyin || "",
+    ],
+  );
+}
+
+/** 补齐：有排行父或审单父、但缺 relation 的平台成员 */
+export async function repairMissingParentRelations() {
+  if (!(await tableExists("tb_people_relation"))) return { fixed: 0 };
+  await ensureSiblingOrderTable();
+  const result = await execute(
+    `INSERT INTO tb_people_relation
+      (F_PEOPLE_ID, F_FATHER, F_PARENT_ID, F_PARENT_NAME, F_PARENT_NO, F_FATHER_ID, F_FATHER_NO, F_PINYIN)
+     SELECT s.people_id, '', s.parent_id,
+            IFNULL(pp.F_NAME, ''), IFNULL(pp.F_NO, ''), 0, '', IFNULL(p.F_PINYIN, '')
+     FROM app_sibling_order s
+     JOIN tb_people p ON p.F_ID = s.people_id
+     LEFT JOIN tb_people pp ON pp.F_ID = s.parent_id
+     LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = s.people_id
+     WHERE s.parent_id > 0
+       AND r.F_PEOPLE_ID IS NULL`,
+  );
+  return { fixed: Number(result.affectedRows || 0) };
 }
 
 async function refreshParentChildren(conn: PoolConnection, parentId: number) {

@@ -203,22 +203,21 @@ export function PeopleForm({
       </Field>
 
       <Field label="当前排行" required {...mark("rank")}>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <Input
             disabled={disabled}
-            type="number"
-            min={1}
-            className="w-[88px]"
+            inputMode="numeric"
+            className="w-[4.5rem] shrink-0 text-center"
             value={
               value.siblingOrder != null
-                ? value.siblingOrder + 1
+                ? String(value.siblingOrder + 1)
                 : (() => {
                     const idx = parseRankToIndex(value.rank || "");
-                    return idx != null ? idx + 1 : "";
+                    return idx != null ? String(idx + 1) : "";
                   })()
             }
             onChange={(e) => {
-              const raw = e.target.value;
+              const raw = e.target.value.replace(/\D/g, "");
               if (raw === "") {
                 onChange({ ...value, rank: "", siblingOrder: null });
                 return;
@@ -236,10 +235,15 @@ export function PeopleForm({
             placeholder="序号"
             title="1=长子/长女，2=次子/次女…"
           />
-          <span className="text-xs text-muted">↔</span>
+          <span
+            className="shrink-0 select-none text-base font-medium text-accent"
+            title="数字与排行互相换算"
+          >
+            ↔
+          </span>
           <Input
             disabled={disabled}
-            className="min-w-[140px] flex-1"
+            className="min-w-0 flex-1"
             value={value.rank || ""}
             onChange={(e) => {
               const rank = e.target.value;
