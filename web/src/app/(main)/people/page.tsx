@@ -452,7 +452,7 @@ export default function PeoplePage() {
             onKeyDown={(e) => {
               if (e.key === "Enter") applySearch();
             }}
-            placeholder="爷爷姓名/拼音"
+            placeholder="祖父姓名/拼音"
           />
         </FilterField>
         <FilterField className="w-24">

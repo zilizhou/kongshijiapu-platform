@@ -244,7 +244,7 @@ export async function searchPeople(opts: {
   exactName?: boolean;
   /** 父亲姓名（谱上父 / 当前父） */
   fatherName?: string;
-  /** 爷爷姓名（父之父） */
+  /** 祖父姓名（父之父） */
   grandfatherName?: string;
   /** 拼音（支持带空格或不带空格） */
   pinyin?: string;
