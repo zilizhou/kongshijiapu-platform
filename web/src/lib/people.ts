@@ -178,7 +178,14 @@ function pinyinLikeClause(
   return `(LOWER(IFNULL(${column}, '')) LIKE :${key} OR REPLACE(LOWER(IFNULL(${column}, '')), ' ', '') LIKE :${keyCompact})`;
 }
 
-/** 姓名类条件：汉字名 LIKE + 拼音 LIKE（可输入汉字或拼音） */
+/** 是否像纯汉字姓名（不含拉丁字母）——此类不必扫拼音列 */
+function looksLikeChineseName(input: string): boolean {
+  const s = (input || "").trim();
+  if (!s) return false;
+  return /[\u4e00-\u9fff]/.test(s) && !/[a-zA-Z]/.test(s);
+}
+
+/** 姓名类条件：汉字只走 F_NAME（可走索引变体）；含字母时才兼查拼音 */
 function nameOrPinyinClause(
   nameColumns: string[],
   pinyinColumn: string,
@@ -192,6 +199,7 @@ function nameOrPinyinClause(
     paramPrefix,
     params,
   );
+  if (looksLikeChineseName(input)) return namePart;
   const pyPart = pinyinLikeClause(
     pinyinColumn,
     input,
@@ -205,6 +213,7 @@ function nameOrPinyinClause(
 async function findPeopleIdsByName(name: string, limit = 80): Promise<number[]> {
   const variants = searchTextVariants(name);
   if (!variants.length) return [];
+  const lim = Math.max(1, Math.min(200, limit));
 
   const exactParams: Record<string, unknown> = {};
   const exactParts = variants.map((v, i) => {
@@ -217,7 +226,7 @@ async function findPeopleIdsByName(name: string, limit = 80): Promise<number[]> 
      FROM tb_people p
      WHERE (${exactParts.join(" OR ")})
      ORDER BY (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END), p.F_ID DESC
-     LIMIT ${Math.max(1, Math.min(200, limit))}`,
+     LIMIT ${lim}`,
     exactParams,
   );
   if (exactRows.length) {
@@ -225,17 +234,67 @@ async function findPeopleIdsByName(name: string, limit = 80): Promise<number[]> 
   }
 
   const params: Record<string, unknown> = {};
-  const nameClause = likeOrClause(["p.F_NAME"], variants, "fn", params);
-  const pyClause = pinyinLikeClause("p.F_PINYIN", name, "fnPy", params);
+  // 模糊：汉字只 LIKE 姓名；拼音输入才扫 F_PINYIN（避免拖垮父系检索）
+  const where = looksLikeChineseName(name)
+    ? likeOrClause(["p.F_NAME"], variants, "fn", params)
+    : `(${likeOrClause(["p.F_NAME"], variants, "fn", params)} OR ${pinyinLikeClause("p.F_PINYIN", name, "fnPy", params)})`;
   const rows = await query<RowDataPacket[]>(
     `SELECT p.F_ID AS id
      FROM tb_people p
-     WHERE (${nameClause} OR ${pyClause})
+     WHERE ${where}
      ORDER BY (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END), p.F_ID DESC
-     LIMIT ${Math.max(1, Math.min(200, limit))}`,
+     LIMIT ${lim}`,
     params,
   );
   return rows.map((r) => Number(r.id)).filter((id) => id > 0);
+}
+
+/** 按父 ID 批量取直接子代 ID（走 parent 索引，避免对 tb_people 做 LEFT JOIN+OR） */
+async function findChildIdsByParentIds(
+  parentIds: number[],
+  limit = 5000,
+): Promise<number[]> {
+  const ids = [...new Set(parentIds.filter((x) => x > 0))];
+  if (!ids.length) return [];
+  const out = new Set<number>();
+  const ph = ids.map((_, i) => `:p${i}`).join(",");
+  const params: Record<string, unknown> = {};
+  ids.forEach((id, i) => {
+    params[`p${i}`] = id;
+  });
+
+  if (await tableExists("tb_people_relation")) {
+    const rows = await query<RowDataPacket[]>(
+      `SELECT F_PEOPLE_ID AS id
+       FROM tb_people_relation
+       WHERE F_PARENT_ID IN (${ph})
+       LIMIT ${Math.max(1, limit)}`,
+      params,
+    );
+    for (const r of rows) {
+      const id = Number(r.id);
+      if (id > 0) out.add(id);
+    }
+  }
+
+  try {
+    await ensureSiblingOrderTable();
+    const rows = await query<RowDataPacket[]>(
+      `SELECT people_id AS id
+       FROM app_sibling_order
+       WHERE parent_id IN (${ph})
+       LIMIT ${Math.max(1, Math.min(2000, limit))}`,
+      params,
+    );
+    for (const r of rows) {
+      const id = Number(r.id);
+      if (id > 0) out.add(id);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return [...out];
 }
 
 export async function searchPeople(opts: {
@@ -276,58 +335,78 @@ export async function searchPeople(opts: {
   const ziHao = opts.ziHao?.trim() || "";
   const keyword = opts.q?.trim() || "";
 
-  if (opts.parentId) {
-    where.push("(r.F_PARENT_ID = :parentId OR so.parent_id = :parentId)");
-    params.parentId = opts.parentId;
-  }
   if (opts.name) {
     const nameVariants = searchTextVariants(opts.name);
-    if (opts.exactName) {
-      if (!nameVariants.length) {
-        where.push("1=0");
-      } else {
-        const parts = nameVariants.map((v, i) => {
-          const key = `ename${i}`;
-          params[key] = v;
-          return `p.F_NAME = :${key}`;
-        });
-        where.push(`(${parts.join(" OR ")})`);
-      }
+    if (!nameVariants.length) {
+      where.push("1=0");
+    } else if (opts.exactName) {
+      const parts = nameVariants.map((v, i) => {
+        const key = `ename${i}`;
+        params[key] = v;
+        return `p.F_NAME = :${key}`;
+      });
+      where.push(`(${parts.join(" OR ")})`);
+    } else if (looksLikeChineseName(opts.name)) {
+      // 纯汉字：精确 + 前缀（可走 F_NAME 索引），避免 '%x%' 与拼音全表扫
+      const parts: string[] = [];
+      nameVariants.forEach((v, i) => {
+        params[`ename${i}`] = v;
+        params[`pname${i}`] = `${v}%`;
+        parts.push(`p.F_NAME = :ename${i}`);
+        parts.push(`p.F_NAME LIKE :pname${i}`);
+      });
+      where.push(`(${parts.join(" OR ")})`);
     } else {
-      // 姓名框可输汉字或拼音
+      // 拼音/混合：姓名 LIKE + 拼音
       where.push(
         nameOrPinyinClause(["p.F_NAME"], "p.F_PINYIN", opts.name, "name", params),
       );
     }
   }
-  // 父/祖父：先按姓名定位 ID，再走索引 F_PARENT_ID（避免对父名全表 LIKE，且能命中新人）
-  let fatherIds: number[] = [];
-  let grandfatherIds: number[] = [];
+
+  // 父/祖父/指定父：先按 parent 索引收集子代 ID，再 p.F_ID IN (...)，避免 LEFT JOIN+OR 全表扫
+  let scopedPeopleIds: number[] | null = null;
+  if (opts.parentId) {
+    const kids = await findChildIdsByParentIds([Number(opts.parentId)]);
+    if (!kids.length) return { total: 0, page, pageSize, items: [] };
+    scopedPeopleIds = kids;
+  }
   if (fatherName) {
-    fatherIds = await findPeopleIdsByName(fatherName, 80);
-    if (!fatherIds.length) {
-      return { total: 0, page, pageSize, items: [] };
+    const fatherIds = await findPeopleIdsByName(fatherName, 80);
+    if (!fatherIds.length) return { total: 0, page, pageSize, items: [] };
+    const kids = await findChildIdsByParentIds(fatherIds);
+    if (!kids.length) return { total: 0, page, pageSize, items: [] };
+    if (scopedPeopleIds == null) scopedPeopleIds = kids;
+    else {
+      const allow = new Set(kids);
+      scopedPeopleIds = scopedPeopleIds.filter((id) => allow.has(id));
     }
-    const ph = fatherIds.map((_, i) => `:fid${i}`).join(",");
-    fatherIds.forEach((id, i) => {
-      params[`fid${i}`] = id;
-    });
-    where.push(
-      `(r.F_PARENT_ID IN (${ph}) OR so.parent_id IN (${ph}))`,
-    );
   }
   if (grandfatherName) {
-    grandfatherIds = await findPeopleIdsByName(grandfatherName, 80);
-    if (!grandfatherIds.length) {
+    const grandfatherIds = await findPeopleIdsByName(grandfatherName, 80);
+    if (!grandfatherIds.length) return { total: 0, page, pageSize, items: [] };
+    // 祖父 → 父辈 → 本人
+    const midIds = await findChildIdsByParentIds(grandfatherIds);
+    if (!midIds.length) return { total: 0, page, pageSize, items: [] };
+    const kids = await findChildIdsByParentIds(midIds);
+    if (!kids.length) return { total: 0, page, pageSize, items: [] };
+    if (scopedPeopleIds == null) scopedPeopleIds = kids;
+    else {
+      const allow = new Set(kids);
+      scopedPeopleIds = scopedPeopleIds.filter((id) => allow.has(id));
+    }
+  }
+  if (scopedPeopleIds != null) {
+    if (!scopedPeopleIds.length) {
       return { total: 0, page, pageSize, items: [] };
     }
-    const ph = grandfatherIds.map((_, i) => `:gid${i}`).join(",");
-    grandfatherIds.forEach((id, i) => {
-      params[`gid${i}`] = id;
+    // 防止 IN 列表过大；父系检索结果通常远小于此
+    const capped = scopedPeopleIds.slice(0, 8000);
+    const ph = capped.map((_, i) => `:sid${i}`).join(",");
+    capped.forEach((id, i) => {
+      params[`sid${i}`] = id;
     });
-    where.push(
-      `(gp.F_PARENT_ID IN (${ph}) OR so_parent_meta.parent_id IN (${ph}))`,
-    );
+    where.push(`p.F_ID IN (${ph})`);
   }
   if (pinyin) {
     where.push(pinyinLikeClause("p.F_PINYIN", pinyin, "pinyin", params));
@@ -400,10 +479,15 @@ export async function searchPeople(opts: {
   const hasRelation = await tableExists("tb_people_relation");
 
   if ((opts.parentId || fatherName || grandfatherName) && !hasRelation) {
-    return { total: 0, page, pageSize, items: [] };
+    // 无 relation 时仍可能靠 sibling_order；若两边都空上面已返回
+    try {
+      await ensureSiblingOrderTable();
+    } catch {
+      return { total: 0, page, pageSize, items: [] };
+    }
   }
 
-  // 父亲检索前补齐缺 relation 的排行父子，避免终审新人「按父查不到」
+  // 父亲检索前补齐缺 relation 的排行父子（每小时最多一次，不阻塞日常查询）
   if (hasRelation && (fatherName || opts.parentId)) {
     try {
       await repairMissingParentRelations();
@@ -419,37 +503,8 @@ export async function searchPeople(opts: {
       courtesyTableReady || (await tableExists("app_people_courtesy"));
   }
 
-  // 列表不 JOIN info：导入期 tb_people_info 写入很重，联表会拖到数秒～超时。
-  // 详情抽屉走 getPeopleById。
-  // COUNT 勿无谓 JOIN relation：170 万行 LEFT JOIN 计数可达数秒；仅筛父系时才需要。
-  if (hasRelation || fatherName || grandfatherName || opts.parentId) {
-    await ensureSiblingOrderTable();
-  }
-  const needRelationJoin =
-    hasRelation &&
-    Boolean(opts.parentId || fatherName || grandfatherName);
-  const needGrandparentJoin = hasRelation && Boolean(grandfatherName);
-  const needSiblingParentJoin = Boolean(
-    fatherName || grandfatherName || opts.parentId,
-  );
-
-  // 仅筛父/祖时才 JOIN relation/sibling_order，避免无筛选时 170 万行 LEFT JOIN 把 COUNT 拖到数秒
-  const fromJoins = [
-    needRelationJoin
-      ? "LEFT JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID"
-      : "",
-    needSiblingParentJoin
-      ? "LEFT JOIN app_sibling_order so ON so.people_id = p.F_ID"
-      : "",
-    needGrandparentJoin
-      ? "LEFT JOIN tb_people_relation gp ON gp.F_PEOPLE_ID = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
-      : "",
-    grandfatherName
-      ? "LEFT JOIN app_sibling_order so_parent_meta ON so_parent_meta.people_id = COALESCE(NULLIF(r.F_PARENT_ID,0), so.parent_id)"
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n     ");
+  // 父系已改为 ID 预筛，主查询不再 JOIN relation / sibling_order
+  const fromJoins = "";
 
   const courtesyJoin = needCourtesy
     ? "LEFT JOIN app_people_courtesy courtesy ON courtesy.people_id = p.F_ID"
