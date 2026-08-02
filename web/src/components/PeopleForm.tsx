@@ -204,147 +204,102 @@ export function PeopleForm({
       </Field>
 
       <Field label="当前排行" required {...mark("rank")}>
-        <div className="flex items-center gap-1.5">
-          <div className="w-12 shrink-0">
-            <Input
-              disabled={disabled}
-              inputMode="numeric"
-              className="px-1 text-center"
-              value={
-                value.siblingOrder != null
-                  ? String(value.siblingOrder + 1)
-                  : (() => {
-                      const idx = parseRankToIndex(value.rank || "");
-                      return idx != null ? String(idx + 1) : "";
-                    })()
-              }
-              onChange={(e) => {
-                const raw = e.target.value.replace(/\D/g, "");
-                if (raw === "") {
-                  onChange({ ...value, rank: "", siblingOrder: null });
-                  return;
-                }
-                const n = Number(raw);
-                if (!Number.isFinite(n) || n < 1) return;
-                const idx = Math.floor(n) - 1;
-                // 输入序号默认「子」（如 2→次子）；已选过「女」或排行带女则保持女
-                const keepFemale =
-                  parseRankGender(value.rank || "") === "女" ||
-                  value.sex === "女";
-                const sex = keepFemale ? "女" : "男";
-                onChange({
-                  ...value,
-                  sex,
-                  siblingOrder: idx,
-                  rank: rankLabelSimplified(sex, idx),
-                });
-              }}
-              placeholder="2"
-              title="序号：1=长，2=次…"
-            />
-          </div>
-          <span
-            className="shrink-0 select-none text-sm font-medium text-accent"
-            title="数字与排行互相换算"
-          >
-            ↔
-          </span>
-          <div className="w-[5.5rem] shrink-0">
-            <Input
-              disabled={disabled}
-              className="px-2 text-center"
-              value={value.rank || ""}
-              onChange={(e) => {
-                const rank = e.target.value;
-                const idx = parseRankToIndex(rank);
-                const g = parseRankGender(rank);
-                if (idx != null) {
-                  onChange({
-                    ...value,
-                    rank,
-                    siblingOrder: idx,
-                    ...(g ? { sex: g } : {}),
-                  });
-                } else {
-                  onChange({
-                    ...value,
-                    rank,
-                    siblingOrder: null,
-                    ...(g ? { sex: g } : {}),
-                  });
-                }
-              }}
-              onBlur={() => {
-                const idx =
-                  value.siblingOrder ?? parseRankToIndex(value.rank || "");
-                if (idx == null) return;
-                const sex =
-                  parseRankGender(value.rank || "") ||
-                  (value.sex === "女" ? "女" : "男");
-                const normalized = rankLabelSimplified(sex, idx);
-                if (
-                  value.siblingOrder === idx &&
-                  value.rank === normalized &&
-                  value.sex === sex
-                ) {
-                  return;
-                }
-                onChange({
-                  ...value,
-                  sex,
-                  siblingOrder: idx,
-                  rank: normalized,
-                });
-              }}
-              placeholder="次子"
-              title="排行文案，如长子、次女"
-            />
-          </div>
-          <div
-            className="inline-flex shrink-0 overflow-hidden rounded-lg border border-line"
-            title="选择子或女（输入序号默认「子」）"
-          >
-            {(
-              [
-                ["男", "子"],
-                ["女", "女"],
-              ] as const
-            ).map(([sexVal, label]) => {
-              const idx =
-                value.siblingOrder ?? parseRankToIndex(value.rank || "");
-              const active =
-                (parseRankGender(value.rank || "") ||
-                  (value.sex === "女" ? "女" : "男")) === sexVal;
-              return (
-                <button
-                  key={sexVal}
-                  type="button"
-                  disabled={disabled || idx == null}
-                  className={`px-2.5 py-1.5 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                    active
-                      ? "bg-accent text-white"
-                      : "bg-white text-ink hover:bg-soft"
+        {(() => {
+          const rankIdx =
+            value.siblingOrder ?? parseRankToIndex(value.rank || "");
+          const rankSex =
+            parseRankGender(value.rank || "") ||
+            (value.sex === "女" ? "女" : "男");
+          // 有序号时文案不应为空：按性别显示长子/次女等
+          const rankText =
+            (value.rank || "").trim() ||
+            (rankIdx != null ? rankLabelSimplified(rankSex, rankIdx) : "");
+          return (
+            <>
+              <div className="flex items-center gap-1.5">
+                <div className="w-12 shrink-0">
+                  <Input
+                    disabled={disabled}
+                    inputMode="numeric"
+                    className="px-1 text-center"
+                    value={rankIdx != null ? String(rankIdx + 1) : ""}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\D/g, "");
+                      if (raw === "") {
+                        onChange({ ...value, rank: "", siblingOrder: null });
+                        return;
+                      }
+                      const n = Number(raw);
+                      if (!Number.isFinite(n) || n < 1) return;
+                      const idx = Math.floor(n) - 1;
+                      // 跟当前性别走：女→次女，男→次子
+                      const sex = value.sex === "女" ? "女" : "男";
+                      onChange({
+                        ...value,
+                        sex,
+                        siblingOrder: idx,
+                        rank: rankLabelSimplified(sex, idx),
+                      });
+                    }}
+                    placeholder="2"
+                    title="序号：1=长，2=次…"
+                  />
+                </div>
+                <span className="shrink-0 select-none text-sm text-muted">
+                  →
+                </span>
+                <span
+                  className={`inline-flex h-[38px] min-w-[4.5rem] shrink-0 items-center justify-center rounded-lg border border-line px-2 text-sm ${
+                    rankText ? "bg-soft text-ink" : "bg-white text-muted"
                   }`}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    if (idx == null) return;
-                    onChange({
-                      ...value,
-                      sex: sexVal,
-                      siblingOrder: idx,
-                      rank: rankLabelSimplified(sexVal, idx),
-                    });
-                  }}
+                  title="由序号与子/女自动生成"
                 >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <p className="mt-1 text-xs text-muted">
-          如 2↔次子，右侧可改选「女」为次女
-        </p>
+                  {rankText || "—"}
+                </span>
+                <div
+                  className="inline-flex shrink-0 overflow-hidden rounded-lg border border-line"
+                  title="选择子或女"
+                >
+                  {(
+                    [
+                      ["男", "子"],
+                      ["女", "女"],
+                    ] as const
+                  ).map(([sexVal, label]) => {
+                    const active = rankSex === sexVal;
+                    return (
+                      <button
+                        key={sexVal}
+                        type="button"
+                        disabled={disabled || rankIdx == null}
+                        className={`px-2.5 py-1.5 text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                          active
+                            ? "bg-accent text-white"
+                            : "bg-white text-ink hover:bg-soft"
+                        }`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (rankIdx == null) return;
+                          onChange({
+                            ...value,
+                            sex: sexVal,
+                            siblingOrder: rankIdx,
+                            rank: rankLabelSimplified(sexVal, rankIdx),
+                          });
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-muted">
+                输入序号后显示排行；性别为女时 2→次女，可点右侧切换子/女
+              </p>
+            </>
+          );
+        })()}
       </Field>
       <Field label="世代" {...mark("level")}>
         <Input
