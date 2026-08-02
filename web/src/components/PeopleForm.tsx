@@ -204,97 +204,102 @@ export function PeopleForm({
       </Field>
 
       <Field label="当前排行" required {...mark("rank")}>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            disabled={disabled}
-            inputMode="numeric"
-            className="w-[4.5rem] shrink-0 text-center"
-            value={
-              value.siblingOrder != null
-                ? String(value.siblingOrder + 1)
-                : (() => {
-                    const idx = parseRankToIndex(value.rank || "");
-                    return idx != null ? String(idx + 1) : "";
-                  })()
-            }
-            onChange={(e) => {
-              const raw = e.target.value.replace(/\D/g, "");
-              if (raw === "") {
-                onChange({ ...value, rank: "", siblingOrder: null });
-                return;
+        <div className="flex items-center gap-1.5">
+          <div className="w-12 shrink-0">
+            <Input
+              disabled={disabled}
+              inputMode="numeric"
+              className="px-1 text-center"
+              value={
+                value.siblingOrder != null
+                  ? String(value.siblingOrder + 1)
+                  : (() => {
+                      const idx = parseRankToIndex(value.rank || "");
+                      return idx != null ? String(idx + 1) : "";
+                    })()
               }
-              const n = Number(raw);
-              if (!Number.isFinite(n) || n < 1) return;
-              const idx = Math.floor(n) - 1;
-              // 输入序号默认「子」（如 2→次子）；已选过「女」或排行带女则保持女
-              const keepFemale =
-                parseRankGender(value.rank || "") === "女" ||
-                value.sex === "女";
-              const sex = keepFemale ? "女" : "男";
-              onChange({
-                ...value,
-                sex,
-                siblingOrder: idx,
-                rank: rankLabelSimplified(sex, idx),
-              });
-            }}
-            placeholder="序号"
-            title="1=长/次…，默认子，右侧可改选女"
-          />
+              onChange={(e) => {
+                const raw = e.target.value.replace(/\D/g, "");
+                if (raw === "") {
+                  onChange({ ...value, rank: "", siblingOrder: null });
+                  return;
+                }
+                const n = Number(raw);
+                if (!Number.isFinite(n) || n < 1) return;
+                const idx = Math.floor(n) - 1;
+                // 输入序号默认「子」（如 2→次子）；已选过「女」或排行带女则保持女
+                const keepFemale =
+                  parseRankGender(value.rank || "") === "女" ||
+                  value.sex === "女";
+                const sex = keepFemale ? "女" : "男";
+                onChange({
+                  ...value,
+                  sex,
+                  siblingOrder: idx,
+                  rank: rankLabelSimplified(sex, idx),
+                });
+              }}
+              placeholder="2"
+              title="序号：1=长，2=次…"
+            />
+          </div>
           <span
-            className="shrink-0 select-none text-base font-medium text-accent"
+            className="shrink-0 select-none text-sm font-medium text-accent"
             title="数字与排行互相换算"
           >
             ↔
           </span>
-          <Input
-            disabled={disabled}
-            className="min-w-0 flex-1 basis-[7rem]"
-            value={value.rank || ""}
-            onChange={(e) => {
-              const rank = e.target.value;
-              const idx = parseRankToIndex(rank);
-              const g = parseRankGender(rank);
-              if (idx != null) {
+          <div className="w-[5.5rem] shrink-0">
+            <Input
+              disabled={disabled}
+              className="px-2 text-center"
+              value={value.rank || ""}
+              onChange={(e) => {
+                const rank = e.target.value;
+                const idx = parseRankToIndex(rank);
+                const g = parseRankGender(rank);
+                if (idx != null) {
+                  onChange({
+                    ...value,
+                    rank,
+                    siblingOrder: idx,
+                    ...(g ? { sex: g } : {}),
+                  });
+                } else {
+                  onChange({
+                    ...value,
+                    rank,
+                    siblingOrder: null,
+                    ...(g ? { sex: g } : {}),
+                  });
+                }
+              }}
+              onBlur={() => {
+                const idx =
+                  value.siblingOrder ?? parseRankToIndex(value.rank || "");
+                if (idx == null) return;
+                const sex =
+                  parseRankGender(value.rank || "") ||
+                  (value.sex === "女" ? "女" : "男");
+                const normalized = rankLabelSimplified(sex, idx);
+                if (
+                  value.siblingOrder === idx &&
+                  value.rank === normalized &&
+                  value.sex === sex
+                ) {
+                  return;
+                }
                 onChange({
                   ...value,
-                  rank,
+                  sex,
                   siblingOrder: idx,
-                  ...(g ? { sex: g } : {}),
+                  rank: normalized,
                 });
-              } else {
-                onChange({
-                  ...value,
-                  rank,
-                  siblingOrder: null,
-                  ...(g ? { sex: g } : {}),
-                });
-              }
-            }}
-            onBlur={() => {
-              const idx =
-                value.siblingOrder ?? parseRankToIndex(value.rank || "");
-              if (idx == null) return;
-              const sex =
-                parseRankGender(value.rank || "") ||
-                (value.sex === "女" ? "女" : "男");
-              const normalized = rankLabelSimplified(sex, idx);
-              if (
-                value.siblingOrder === idx &&
-                value.rank === normalized &&
-                value.sex === sex
-              ) {
-                return;
-              }
-              onChange({
-                ...value,
-                sex,
-                siblingOrder: idx,
-                rank: normalized,
-              });
-            }}
-            placeholder="如：长子、次女"
-          />
+              }}
+              placeholder="次子"
+              title="排行文案，如长子、次女"
+            />
+          </div>
           <div
             className="inline-flex shrink-0 overflow-hidden rounded-lg border border-line"
             title="选择子或女（输入序号默认「子」）"
@@ -338,7 +343,7 @@ export function PeopleForm({
           </div>
         </div>
         <p className="mt-1 text-xs text-muted">
-          输入序号默认「子」（如 2→次子），右侧可改选「女」变为次女；也可直接填长子/次女
+          如 2↔次子，右侧可改选「女」为次女
         </p>
       </Field>
       <Field label="世代" {...mark("level")}>
