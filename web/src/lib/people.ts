@@ -925,6 +925,76 @@ async function attachSiblingMeta(people: PeopleRow[]): Promise<PeopleRow[]> {
   });
 }
 
+/**
+ * 无 app_sibling_order 时，按同父兄弟顺序推断排行（与世系图/展开子代一致），供编辑表单回填。
+ */
+async function inferSiblingRankFromParent(
+  peopleId: number,
+  parentId: number,
+  sex: string,
+): Promise<{ siblingOrder: number; rank: string } | null> {
+  const hasRelation = await tableExists("tb_people_relation");
+  type Sib = { id: number; no: string | null; sex: string };
+  let siblings: Sib[] = [];
+
+  if (hasRelation) {
+    const rows = await query<RowDataPacket[]>(
+      `SELECT p.F_ID AS id, p.F_NO AS no, p.F_SEX AS sex
+       FROM tb_people_relation r
+       JOIN tb_people p ON p.F_ID = r.F_PEOPLE_ID
+       WHERE r.F_PARENT_ID = :parentId
+       LIMIT 200`,
+      { parentId },
+    );
+    siblings = rows.map((r) => ({
+      id: Number(r.id),
+      no: r.no != null ? String(r.no) : null,
+      sex: String(r.sex || "男"),
+    }));
+  }
+
+  try {
+    await ensureSiblingOrderTable();
+    const soRows = await query<RowDataPacket[]>(
+      `SELECT s.people_id AS id, p.F_NO AS no, p.F_SEX AS sex, s.sort_no
+       FROM app_sibling_order s
+       JOIN tb_people p ON p.F_ID = s.people_id
+       WHERE s.parent_id = :parentId
+       LIMIT 200`,
+      { parentId },
+    );
+    const have = new Set(siblings.map((s) => s.id));
+    for (const r of soRows) {
+      const id = Number(r.id);
+      if (have.has(id)) continue;
+      siblings.push({
+        id,
+        no: r.no != null ? String(r.no) : null,
+        sex: String(r.sex || "男"),
+      });
+    }
+    const meta = await loadSiblingMeta(siblings.map((s) => s.id));
+    siblings = sortByBirthOrder(
+      siblings.map((s) => ({
+        ...s,
+        siblingOrder: meta.get(s.id)?.sortNo ?? null,
+      })),
+    );
+  } catch {
+    siblings = sortByBirthOrder(
+      siblings.map((s) => ({ ...s, siblingOrder: null as number | null })),
+    );
+  }
+
+  const idx = siblings.findIndex((s) => s.id === peopleId);
+  if (idx < 0) return null;
+  const s = siblings[idx];
+  return {
+    siblingOrder: idx,
+    rank: rankLabelTraditional(s.sex || sex, idx),
+  };
+}
+
 export async function applySiblingReorder(
   conn: PoolConnection,
   parentId: number,
@@ -1170,7 +1240,7 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
         person.parentName = parent.name;
       }
     }
-    // 排行以 app_sibling_order 为准（覆盖可能过期的展示字段）
+    // 排行：优先 app_sibling_order；旧谱常无此表行，则按同父兄弟顺序推断（与世系图一致）
     if (person.parentId) {
       try {
         await ensureSiblingOrderTable();
@@ -1184,6 +1254,17 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
           person.rank =
             String(so[0].rank_label || "") ||
             rankLabelTraditional(person.sex, Number(so[0].sort_no) || 0);
+        } else if (person.siblingOrder == null || !person.rank) {
+          const inferred = await inferSiblingRankFromParent(
+            id,
+            person.parentId,
+            person.sex,
+          );
+          if (inferred) {
+            person.siblingOrder =
+              person.siblingOrder ?? inferred.siblingOrder;
+            person.rank = person.rank || inferred.rank;
+          }
         }
       } catch {
         /* ignore */
