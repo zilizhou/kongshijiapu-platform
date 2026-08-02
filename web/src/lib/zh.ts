@@ -159,3 +159,11 @@ export function parseRankToIndex(input: string): number | null {
   }
   return null;
 }
+
+/** 从排行文案解析子/女；无法判断时返回 null */
+export function parseRankGender(input: string): "男" | "女" | null {
+  const t = toTraditional((input || "").trim());
+  if (/女$/.test(t) || t.includes("女")) return "女";
+  if (/子$/.test(t) || t.includes("子")) return "男";
+  return null;
+}
