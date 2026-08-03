@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChangeRequest,
   OBJECT_TYPE_LABEL,
@@ -14,11 +14,27 @@ import {
   FilterBar,
   FilterField,
   Input,
+  Label,
   PageHeader,
   StatusPill,
   TableScroll,
+  Textarea,
   tableHeadClass,
 } from "@/components/ui";
+
+type BatchResult = {
+  id: number;
+  name: string;
+  ok: boolean;
+  error?: string;
+};
+
+function batchApproveLabel(role: SessionUser["role"] | undefined) {
+  if (role === "final") return "批量通过（生效）";
+  if (role === "first") return "批量送二审";
+  if (role === "second") return "批量送终审";
+  return "批量通过";
+}
 
 export default function ReviewListPage() {
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -28,6 +44,12 @@ export default function ReviewListPage() {
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
+  const [selected, setSelected] = useState<Record<number, boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [batchMsg, setBatchMsg] = useState("");
+  const [batchResults, setBatchResults] = useState<BatchResult[] | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -57,13 +79,64 @@ export default function ReviewListPage() {
     }
     setItems(data.items);
     setTotal(data.total);
+    setSelected({});
+    setRejectOpen(false);
   }, [page, q, canReview]);
 
   useEffect(() => {
     if (ready && canReview) load();
   }, [load, ready, canReview]);
 
+  const pageIds = useMemo(() => items.map((i) => i.id), [items]);
+  const selectedIds = useMemo(
+    () => pageIds.filter((id) => selected[id]),
+    [pageIds, selected],
+  );
+  const allPageSelected =
+    pageIds.length > 0 && pageIds.every((id) => selected[id]);
+
   const pages = Math.max(1, Math.ceil(total / 20));
+
+  async function runBatch(action: "approve" | "reject") {
+    if (!selectedIds.length) return;
+    if (action === "reject" && !rejectReason.trim()) {
+      setError("请填写驳回原因");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setBatchMsg("");
+    setBatchResults(null);
+    try {
+      const res = await fetch("/api/requests/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          ids: selectedIds,
+          reason: action === "reject" ? rejectReason.trim() : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "批量审核失败");
+      const results = (data.results || []) as BatchResult[];
+      setBatchResults(results);
+      const ok = Number(data.okCount || 0);
+      const fail = Number(data.failCount || 0);
+      setBatchMsg(
+        action === "approve"
+          ? `批量通过完成：成功 ${ok} 条${fail ? `，失败 ${fail} 条` : ""}`
+          : `批量驳回完成：成功 ${ok} 条${fail ? `，失败 ${fail} 条` : ""}`,
+      );
+      setRejectOpen(false);
+      setRejectReason("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "批量审核失败");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (!ready) {
     return <div className="text-muted">加载中...</div>;
@@ -90,7 +163,7 @@ export default function ReviewListPage() {
     <div>
       <PageHeader
         title="信息审核"
-        desc="家谱与派户支共用审流。常规路径：一审→二审→终审；终审也可直接审核录入员提交的待审单并生效。修改字段会琥珀色高亮对照原值。"
+        desc="家谱与派户支共用审流。常规路径：一审→二审→终审；终审也可直接审核录入员提交的待审单并生效。支持勾选本页单据批量通过或驳回。"
       />
 
       <FilterBar
@@ -117,12 +190,120 @@ export default function ReviewListPage() {
       </FilterBar>
 
       {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
+      {batchMsg ? <p className="mb-3 text-sm text-ink">{batchMsg}</p> : null}
+      {batchResults?.some((r) => !r.ok) ? (
+        <Card className="mb-3 p-3 text-sm">
+          <div className="mb-1 font-medium text-ink">失败明细</div>
+          <ul className="space-y-1 text-muted">
+            {batchResults
+              .filter((r) => !r.ok)
+              .map((r) => (
+                <li key={r.id}>
+                  #{r.id} {r.name}：{r.error || "失败"}
+                </li>
+              ))}
+          </ul>
+        </Card>
+      ) : null}
+
+      {rejectOpen ? (
+        <Card className="mb-3 space-y-3 p-4">
+          <div className="text-sm font-medium text-ink">
+            批量驳回已选 {selectedIds.length} 条
+          </div>
+          <div>
+            <Label>驳回原因（必填，将写入每条单据）</Label>
+            <Textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={3}
+              placeholder="请说明驳回原因，录入员可见"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="danger"
+              disabled={busy || !rejectReason.trim()}
+              onClick={() => runBatch("reject")}
+            >
+              {busy ? "处理中…" : "确认驳回"}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                setRejectOpen(false);
+                setRejectReason("");
+              }}
+            >
+              取消
+            </Button>
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 text-sm text-muted">
+          <span>
+            共 {total} 条
+            {selectedIds.length ? (
+              <span className="ml-2 text-ink">· 已选 {selectedIds.length} 条</span>
+            ) : (
+              <span className="ml-2">· 勾选后可批量审核</span>
+            )}
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              disabled={!selectedIds.length || busy}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    `确认对已选 ${selectedIds.length} 条执行「${batchApproveLabel(user?.role)}」？`,
+                  )
+                ) {
+                  return;
+                }
+                runBatch("approve");
+              }}
+            >
+              {busy ? "处理中…" : batchApproveLabel(user?.role)}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={!selectedIds.length || busy}
+              onClick={() => {
+                setRejectOpen(true);
+                setError("");
+              }}
+            >
+              批量驳回
+            </Button>
+          </div>
+        </div>
         <TableScroll>
           <table className="min-w-full text-sm">
             <thead className={tableHeadClass}>
               <tr>
+                <th className="w-10 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    className="accent-accent"
+                    checked={allPageSelected}
+                    disabled={!pageIds.length || busy}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setSelected((prev) => {
+                        const next = { ...prev };
+                        for (const id of pageIds) {
+                          if (on) next[id] = true;
+                          else delete next[id];
+                        }
+                        return next;
+                      });
+                    }}
+                    title="全选本页"
+                  />
+                </th>
                 <th className="px-4 py-3">单号</th>
                 <th className="px-4 py-3">类型</th>
                 <th className="px-4 py-3">名称</th>
@@ -135,6 +316,23 @@ export default function ReviewListPage() {
             <tbody>
               {items.map((item) => (
                 <tr key={item.id} className="border-t border-line/70">
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      className="accent-accent"
+                      checked={Boolean(selected[item.id])}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setSelected((prev) => {
+                          const next = { ...prev };
+                          if (on) next[item.id] = true;
+                          else delete next[item.id];
+                          return next;
+                        });
+                      }}
+                    />
+                  </td>
                   <td className="px-4 py-3">#{item.id}</td>
                   <td className="px-4 py-3">
                     {OBJECT_TYPE_LABEL[item.objectType] || "家谱成员"}
@@ -159,7 +357,7 @@ export default function ReviewListPage() {
               ))}
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-muted">
+                  <td colSpan={8} className="px-4 py-8 text-muted">
                     当前没有待审单据
                   </td>
                 </tr>
@@ -174,14 +372,14 @@ export default function ReviewListPage() {
           <div className="flex gap-2">
             <Button
               variant="secondary"
-              disabled={page <= 1}
+              disabled={page <= 1 || busy}
               onClick={() => setPage((p) => p - 1)}
             >
               上一页
             </Button>
             <Button
               variant="secondary"
-              disabled={page >= pages}
+              disabled={page >= pages || busy}
               onClick={() => setPage((p) => p + 1)}
             >
               下一页
