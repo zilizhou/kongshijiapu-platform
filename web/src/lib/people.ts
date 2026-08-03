@@ -2457,11 +2457,6 @@ function buildTreeFromFlat(
   return attach(rootId, 0);
 }
 
-function lineageTreeHasId(node: LineageNode, id: number): boolean {
-  if (node.id === id) return true;
-  return node.children.some((c) => lineageTreeHasId(c, id));
-}
-
 function collectLineageIds(node: LineageNode, into: Set<number>) {
   if (node.id > 0) into.add(node.id);
   for (const c of node.children) collectLineageIds(c, into);
@@ -2602,6 +2597,76 @@ async function buildWideTreeBatched(
   return rootNode;
 }
 
+/**
+ * 对已入树的全部节点按关系表补全子代（含旁系上的平台新录）。
+ * nested-set 常漏掉 left/right 占位的新成员；原先只补直系路径，
+ * 导致以旁系祖先为中心查询时，堂兄弟支下的昭/宪/庆等不显示。
+ */
+async function expandLineageTreeChildren(
+  tree: LineageNode,
+  relatedIds: Set<number>,
+  maxLevel: number,
+): Promise<void> {
+  const collectEligible = (n: LineageNode, into: number[]) => {
+    if (n.id > 0 && Number(n.level ?? 0) < maxLevel) into.push(n.id);
+    for (const c of n.children) collectEligible(c, into);
+  };
+
+  let frontier: number[] = [];
+  collectEligible(tree, frontier);
+  const fetched = new Set<number>();
+  const CHUNK = 30;
+
+  while (frontier.length && relatedIds.size < LINEAGE_NODE_BUDGET) {
+    const parents = [...new Set(frontier)].filter((id) => !fetched.has(id));
+    frontier = [];
+    if (!parents.length) break;
+
+    const kidsMap = new Map<number, PeopleRow[]>();
+    for (let i = 0; i < parents.length; i += CHUNK) {
+      const chunk = parents.slice(i, i + CHUNK);
+      const part = await batchChildrenByParents(chunk, maxLevel);
+      for (const [k, v] of part) kidsMap.set(k, v);
+      for (const id of chunk) fetched.add(id);
+    }
+
+    for (const pid of parents) {
+      const parentNode = findLineageNode(tree, pid);
+      if (!parentNode) continue;
+      const kids = kidsMap.get(pid) || [];
+      if (!kids.length) continue;
+
+      const byId = new Map(parentNode.children.map((c) => [c.id, c]));
+      const next: LineageNode[] = [];
+      const seen = new Set<number>();
+      for (let idx = 0; idx < kids.length; idx++) {
+        const k = kids[idx];
+        if (Number(k.level ?? 0) > maxLevel) continue;
+        let child = byId.get(k.id);
+        if (!child) {
+          if (relatedIds.size >= LINEAGE_NODE_BUDGET) break;
+          child = toLineageNode(k);
+          relatedIds.add(k.id);
+        }
+        child.rank = k.rank || rankLabelTraditional(k.sex, idx);
+        next.push(child);
+        seen.add(k.id);
+        if (Number(k.level ?? 0) < maxLevel && !fetched.has(k.id)) {
+          frontier.push(k.id);
+        }
+      }
+      for (const c of parentNode.children) {
+        if (seen.has(c.id)) continue;
+        next.push(c);
+        if (c.id > 0 && Number(c.level ?? 0) < maxLevel && !fetched.has(c.id)) {
+          frontier.push(c.id);
+        }
+      }
+      parentNode.children = next;
+    }
+  }
+}
+
 /** nested-set 轻量拉取：无 info 联表；区间过大则跳过 */
 async function fetchLineageFlatLite(
   rootId: number,
@@ -2711,60 +2776,8 @@ export async function getLineageTree(
       tree = await buildWideTreeBatched(rootPerson, maxLevel, relatedIds);
     }
 
-    // 补全直系路径上尚未挂上的同父兄弟（平台挂靠）
-    const pathParentIds = [
-      ...ancestors.map((a) => a.id),
-      ...(focus.parentId ? [focus.parentId] : []),
-    ];
-    if (down > 0) pathParentIds.push(focus.id);
-    const uniqParents = [...new Set(pathParentIds)].filter((pid) =>
-      lineageTreeHasId(tree, pid),
-    );
-    if (uniqParents.length) {
-      const kidsMap = await batchChildrenByParents(uniqParents, maxLevel);
-      const missingIds: number[] = [];
-      for (const pid of uniqParents) {
-        const parentNode = findLineageNode(tree, pid);
-        if (!parentNode) continue;
-        const kids = kidsMap.get(pid) || [];
-        // 以 app_sibling_order 为准重排已有子节点，并补全缺失兄弟
-        const byId = new Map(parentNode.children.map((c) => [c.id, c]));
-        const next: LineageNode[] = [];
-        const seen = new Set<number>();
-        kids.forEach((k, idx) => {
-          if (Number(k.level ?? 0) > maxLevel) return;
-          let child = byId.get(k.id);
-          if (!child) {
-            if (relatedIds.size >= LINEAGE_NODE_BUDGET) return;
-            child = toLineageNode(k);
-            relatedIds.add(k.id);
-            if (Number(k.level ?? 0) < maxLevel) missingIds.push(k.id);
-          }
-          child.rank = k.rank || rankLabelTraditional(k.sex, idx);
-          next.push(child);
-          seen.add(k.id);
-        });
-        for (const c of parentNode.children) {
-          if (!seen.has(c.id)) next.push(c);
-        }
-        parentNode.children = next;
-      }
-      // 旁系再向下扩一层
-      if (missingIds.length && relatedIds.size < LINEAGE_NODE_BUDGET) {
-        const subKids = await batchChildrenByParents(missingIds, maxLevel);
-        for (const mid of missingIds) {
-          const host = findLineageNode(tree, mid);
-          if (!host || host.children.length) continue;
-          const kids = subKids.get(mid) || [];
-          host.children = kids.slice(0, 40).map((k, idx) => {
-            relatedIds.add(k.id);
-            const n = toLineageNode(k);
-            n.rank = k.rank || rankLabelTraditional(k.sex, idx);
-            return n;
-          });
-        }
-      }
-    }
+    // nested-set 漏挂平台新录；直系补丁也不够——对图上所有节点按关系表向下补全
+    await expandLineageTreeChildren(tree, relatedIds, maxLevel);
   }
 
   collectLineageIds(tree, relatedIds);
