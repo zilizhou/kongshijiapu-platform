@@ -88,6 +88,24 @@ export default function ReviewDetailPage() {
     return item.beforeSnapshot;
   }, [item]);
 
+  function networkErrorMessage(e: unknown, fallback: string) {
+    if (e instanceof TypeError && /fetch/i.test(e.message)) {
+      return "网络异常或服务无响应，请检查连接后重试";
+    }
+    if (e instanceof Error && e.message) return e.message;
+    return fallback;
+  }
+
+  async function readJson(res: Response) {
+    const text = await res.text();
+    if (!text) return {} as Record<string, unknown>;
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      throw new Error(res.ok ? "服务器返回了无法解析的响应" : `请求失败（${res.status}）`);
+    }
+  }
+
   async function saveOnly() {
     if (!payload) return;
     setBusy(true);
@@ -98,12 +116,12 @@ export default function ReviewDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload, asReviewer: true }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "保存失败");
-      setItem(data.item);
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(String(data.error || "保存失败"));
+      setItem(data.item as ChangeRequest);
       setDirty(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存失败");
+      setError(networkErrorMessage(e, "保存失败"));
     } finally {
       setBusy(false);
     }
@@ -111,6 +129,15 @@ export default function ReviewDetailPage() {
 
   async function saveAndApprove() {
     if (!payload) return;
+    const people = payload as PeoplePayload;
+    if (
+      item?.objectType === "people" &&
+      item.operation === "create" &&
+      (people.parentId == null || people.parentId === 0)
+    ) {
+      setError("请选择当前父（图上新增若父节点仍待审，请先通过父节点单据）");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -120,17 +147,19 @@ export default function ReviewDetailPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ payload, asReviewer: true }),
         });
-        const saveData = await saveRes.json();
-        if (!saveRes.ok) throw new Error(saveData.error || "保存失败");
+        const saveData = await readJson(saveRes);
+        if (!saveRes.ok) throw new Error(String(saveData.error || "保存失败"));
+        if (saveData.item) setItem(saveData.item as ChangeRequest);
+        setDirty(false);
       }
       const res = await fetch(`/api/requests/${params.id}/approve`, {
         method: "POST",
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "通过失败");
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(String(data.error || "通过失败"));
       router.replace("/review");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "通过失败");
+      setError(networkErrorMessage(e, "通过失败"));
     } finally {
       setBusy(false);
     }
@@ -149,11 +178,11 @@ export default function ReviewDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "驳回失败");
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(String(data.error || "驳回失败"));
       router.replace("/review");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "驳回失败");
+      setError(networkErrorMessage(e, "驳回失败"));
     } finally {
       setBusy(false);
     }
@@ -257,13 +286,27 @@ export default function ReviewDetailPage() {
         </div>
         {error ? <p className="mb-3 text-sm text-danger">{error}</p> : null}
         <div className="flex flex-wrap gap-2">
-          <Button disabled={busy} variant="secondary" onClick={saveOnly}>
+          <Button
+            disabled={busy}
+            variant="secondary"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={saveOnly}
+          >
             仅保存修改
           </Button>
-          <Button disabled={busy} onClick={saveAndApprove}>
+          <Button
+            disabled={busy}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={saveAndApprove}
+          >
             {approveLabel(item.status, user?.role)}
           </Button>
-          <Button disabled={busy} variant="danger" onClick={reject}>
+          <Button
+            disabled={busy}
+            variant="danger"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={reject}
+          >
             驳回至录入员
           </Button>
         </div>

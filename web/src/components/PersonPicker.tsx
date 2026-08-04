@@ -33,10 +33,53 @@ export function PersonPicker({
 
   useEffect(() => {
     let cancelled = false;
-    if (!valueId) {
+    if (valueId == null || valueId === 0) {
       setDisplayName("");
       return;
     }
+
+    // 图上链式新增：parentId = -变更单ID；需从变更单取姓名展示
+    if (valueId < 0) {
+      const reqId = Math.abs(valueId);
+      fetch(`/api/requests/${reqId}`)
+        .then(async (r) => {
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || "加载关联父节点失败");
+          return d;
+        })
+        .then((d) => {
+          if (cancelled) return;
+          const name =
+            (d.item?.payload as { name?: string } | undefined)?.name ||
+            `变更单#${reqId}`;
+          const status = String(d.item?.status || "");
+          const objectId = d.item?.objectId != null ? Number(d.item.objectId) : 0;
+          if (status === "approved" && objectId > 0) {
+            // 父单已通过：升为正 ID（详情接口一般已 hydrate；此处作兜底）
+            setDisplayName(name);
+            setKeyword("");
+            if (valueId < 0) onChange(objectId);
+            return;
+          }
+          const statusHint =
+            status === "approved"
+              ? "已通过"
+              : status.startsWith("pending")
+                ? "待审"
+                : status === "draft"
+                  ? "暂存"
+                  : status || "关联";
+          setDisplayName(`${name}（${statusHint} #${reqId}）`);
+          setKeyword("");
+        })
+        .catch(() => {
+          if (!cancelled) setDisplayName(`待审关联 #${reqId}`);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     fetch(`/api/people/${valueId}`)
       .then((r) => r.json())
       .then((d) => {
@@ -48,6 +91,8 @@ export function PersonPicker({
     return () => {
       cancelled = true;
     };
+    // onChange 稳定由父组件保证；仅随 valueId 解析展示
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valueId]);
 
   useEffect(() => {
@@ -69,26 +114,32 @@ export function PersonPicker({
       try {
         const sp = new URLSearchParams({
           name: q.trim(),
-          pageSize: "8",
+          pageSize: "20",
           page: "1",
         });
         const res = await fetch(`/api/people?${sp}`);
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "搜索失败");
         setHits((data.items || []) as Hit[]);
         setOpen(true);
       } catch {
         setHits([]);
+        setOpen(true);
       } finally {
         setLoading(false);
       }
     }, 250);
   }
 
+  const showSelected = valueId != null && valueId !== 0 && displayName && !keyword;
+
   return (
     <div ref={boxRef} className="relative">
-      {valueId && displayName && !keyword ? (
+      {showSelected ? (
         <div className="flex h-[38px] items-center gap-2 rounded-lg border border-line bg-white px-3">
-          <span className="flex-1 truncate text-sm text-ink">{displayName}</span>
+          <span className="flex-1 truncate text-sm text-ink" title={displayName}>
+            {displayName}
+          </span>
           {!disabled ? (
             <button
               type="button"
@@ -142,6 +193,7 @@ export function PersonPicker({
                 {h.sex}
                 {h.level != null ? ` · 第${h.level}世` : ""}
                 {h.groupName ? ` · ${h.groupName}` : ""}
+                {` · #${h.id}`}
               </div>
             </button>
           ))}

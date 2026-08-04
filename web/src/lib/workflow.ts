@@ -39,6 +39,32 @@ import { toTraditionalBranchPayload, toTraditionalPayload } from "./zh";
 
 export type { ChangeRequest };
 
+async function lookupPendingCreateTarget(
+  requestId: number,
+): Promise<{ objectId: number | null; status: string; name: string } | null> {
+  const rows = await query<RowDataPacket[]>(
+    `SELECT object_id, status, payload FROM app_change_requests WHERE id = :id LIMIT 1`,
+    { id: requestId },
+  );
+  const row = rows[0];
+  if (!row) return null;
+  let name = "";
+  try {
+    const payload =
+      typeof row.payload === "string"
+        ? (JSON.parse(row.payload) as { name?: string })
+        : (row.payload as { name?: string } | null);
+    name = String(payload?.name || "").trim();
+  } catch {
+    name = "";
+  }
+  return {
+    objectId: row.object_id != null ? Number(row.object_id) : null,
+    status: String(row.status || ""),
+    name,
+  };
+}
+
 /**
  * 待审链式新增：parentId / asParentOf 可为负（-变更单ID）。
  * 终审落库前解析为已入库的真实人物 ID。
@@ -50,34 +76,45 @@ async function resolvePendingCreateRefs(
 
   if (next.parentId != null && Number(next.parentId) < 0) {
     const reqId = Math.abs(Number(next.parentId));
-    const rows = await query<RowDataPacket[]>(
-      `SELECT object_id, status FROM app_change_requests WHERE id = :id LIMIT 1`,
-      { id: reqId },
-    );
-    const row = rows[0];
-    if (!row || row.status !== "approved" || !row.object_id) {
+    const row = await lookupPendingCreateTarget(reqId);
+    if (!row || row.status !== "approved" || !row.objectId) {
       throw new Error(
         `关联的父节点变更单 #${reqId} 尚未终审通过，请先审核通过后再审本单`,
       );
     }
-    next.parentId = Number(row.object_id);
+    next.parentId = row.objectId;
   }
 
   if (next.asParentOf != null && Number(next.asParentOf) < 0) {
     const reqId = Math.abs(Number(next.asParentOf));
-    const rows = await query<RowDataPacket[]>(
-      `SELECT object_id, status FROM app_change_requests WHERE id = :id LIMIT 1`,
-      { id: reqId },
-    );
-    const row = rows[0];
-    if (!row || row.status !== "approved" || !row.object_id) {
+    const row = await lookupPendingCreateTarget(reqId);
+    if (!row || row.status !== "approved" || !row.objectId) {
       throw new Error(
         `关联的子节点变更单 #${reqId} 尚未终审通过，请先审核通过该人物后再审本父节点单`,
       );
     }
-    next.asParentOf = Number(row.object_id);
+    next.asParentOf = row.objectId;
   }
 
+  return next;
+}
+
+/**
+ * 审核/编辑展示：若父节点引用的待审单已终审，换成真实人物 ID，避免选人框空白。
+ * 不写库；仍为负 ID 的留给 PersonPicker 显示「待审关联」。
+ */
+export async function hydratePeoplePayloadForView(
+  payload: PeoplePayload,
+): Promise<PeoplePayload> {
+  const next = { ...payload };
+  for (const key of ["parentId", "birthFatherId"] as const) {
+    const raw = next[key];
+    if (raw == null || Number(raw) >= 0) continue;
+    const row = await lookupPendingCreateTarget(Math.abs(Number(raw)));
+    if (row?.status === "approved" && row.objectId) {
+      next[key] = row.objectId;
+    }
+  }
   return next;
 }
 
@@ -767,7 +804,14 @@ export async function getRequestById(id: number) {
     `SELECT * FROM app_change_requests WHERE id = :id LIMIT 1`,
     { id },
   );
-  return rows[0] ? mapRequest(rows[0]) : null;
+  if (!rows[0]) return null;
+  const item = mapRequest(rows[0]);
+  if (item.objectType === "people" && item.payload) {
+    item.payload = await hydratePeoplePayloadForView(
+      item.payload as PeoplePayload,
+    );
+  }
+  return item;
 }
 
 export async function listRequests(opts: {
