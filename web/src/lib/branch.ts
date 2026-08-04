@@ -171,8 +171,7 @@ export async function resolvePeopleGroupPatterns(
          (F_NAME = :v) DESC,
          (F_FULL_NAME = :v) DESC,
          (F_NAME LIKE :vLike) DESC,
-         F_ID ASC
-       LIMIT 20`,
+         F_ID ASC`,
       { v, vLike: `%${v}%` },
     );
 
@@ -307,8 +306,7 @@ export async function listBranchOptions(q?: string) {
     `SELECT F_ID AS id, F_NAME AS name, F_FULL_NAME AS fullName
      FROM tb_branch
      WHERE ${where}
-     ORDER BY F_LEFT ASC
-     LIMIT 200`,
+     ORDER BY F_LEFT ASC`,
     params,
   );
   return rows.map((r) => ({

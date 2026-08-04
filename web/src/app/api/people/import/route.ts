@@ -13,7 +13,7 @@ import { searchTextVariants } from "@/lib/zh";
 
 const MAX_ROWS = 200;
 const MAX_BYTES = 2 * 1024 * 1024;
-const MAX_CANDIDATES = 50;
+const MAX_CANDIDATES = 5000;
 
 type ResolveOk = { ok: true; parentId: number | null };
 type ResolveAmbiguous = {

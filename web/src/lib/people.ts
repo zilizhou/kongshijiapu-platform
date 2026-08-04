@@ -209,92 +209,160 @@ function nameOrPinyinClause(
   return `(${namePart} OR ${pyPart})`;
 }
 
-/** 按姓名/拼音定位人物 ID，供父系条件走索引 */
-async function findPeopleIdsByName(name: string, limit = 80): Promise<number[]> {
-  const variants = searchTextVariants(name);
-  if (!variants.length) return [];
-  const lim = Math.max(1, Math.min(200, limit));
-
-  const exactParams: Record<string, unknown> = {};
-  const exactParts = variants.map((v, i) => {
-    const key = `ex${i}`;
-    exactParams[key] = v;
-    return `p.F_NAME = :${key}`;
-  });
-  const exactRows = await query<RowDataPacket[]>(
-    `SELECT p.F_ID AS id
-     FROM tb_people p
-     WHERE (${exactParts.join(" OR ")})
-     ORDER BY (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END), p.F_ID DESC
-     LIMIT ${lim}`,
-    exactParams,
-  );
-  if (exactRows.length) {
-    return exactRows.map((r) => Number(r.id)).filter((id) => id > 0);
+/** 姓名精确或前缀匹配（汉字检索与列表姓名条件一致） */
+function personNameMatchSql(
+  column: string,
+  input: string,
+  prefix: string,
+  params: Record<string, unknown>,
+): string {
+  const variants = searchTextVariants(input);
+  if (!variants.length) return "1=0";
+  if (looksLikeChineseName(input)) {
+    const parts: string[] = [];
+    variants.forEach((v, i) => {
+      params[`${prefix}E${i}`] = v;
+      params[`${prefix}P${i}`] = `${v}%`;
+      parts.push(`${column} = :${prefix}E${i}`);
+      parts.push(`${column} LIKE :${prefix}P${i}`);
+    });
+    return `(${parts.join(" OR ")})`;
   }
-
-  const params: Record<string, unknown> = {};
-  // 模糊：汉字只 LIKE 姓名；拼音输入才扫 F_PINYIN（避免拖垮父系检索）
-  const where = looksLikeChineseName(name)
-    ? likeOrClause(["p.F_NAME"], variants, "fn", params)
-    : `(${likeOrClause(["p.F_NAME"], variants, "fn", params)} OR ${pinyinLikeClause("p.F_PINYIN", name, "fnPy", params)})`;
-  const rows = await query<RowDataPacket[]>(
-    `SELECT p.F_ID AS id
-     FROM tb_people p
-     WHERE ${where}
-     ORDER BY (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END), p.F_ID DESC
-     LIMIT ${lim}`,
-    params,
-  );
-  return rows.map((r) => Number(r.id)).filter((id) => id > 0);
+  return nameOrPinyinClause([column], column.replace(/F_NAME$/, "F_PINYIN"), input, prefix, params);
 }
 
-/** 按父 ID 批量取直接子代 ID（走 parent 索引，避免对 tb_people 做 LEFT JOIN+OR） */
-async function findChildIdsByParentIds(
-  parentIds: number[],
-  limit = 5000,
-): Promise<number[]> {
-  const ids = [...new Set(parentIds.filter((x) => x > 0))];
-  if (!ids.length) return [];
-  const out = new Set<number>();
-  const ph = ids.map((_, i) => `:p${i}`).join(",");
-  const params: Record<string, unknown> = {};
-  ids.forEach((id, i) => {
-    params[`p${i}`] = id;
-  });
+/**
+ * 父系范围条件：用 EXISTS，不预先截断同名父亲/子代 ID。
+ * （局域网少数维护用户，检索须命中全部匹配行；列表仍按 pageSize 分页展示。）
+ */
+async function pushParentScopeExists(
+  where: string[],
+  params: Record<string, unknown>,
+  opts: {
+    parentId?: number;
+    fatherName?: string;
+    grandfatherName?: string;
+  },
+): Promise<boolean> {
+  const parentId = opts.parentId && opts.parentId > 0 ? opts.parentId : 0;
+  const fatherName = opts.fatherName?.trim() || "";
+  const grandfatherName = opts.grandfatherName?.trim() || "";
+  if (!parentId && !fatherName && !grandfatherName) return true;
 
-  if (await tableExists("tb_people_relation")) {
-    const rows = await query<RowDataPacket[]>(
-      `SELECT F_PEOPLE_ID AS id
-       FROM tb_people_relation
-       WHERE F_PARENT_ID IN (${ph})
-       LIMIT ${Math.max(1, limit)}`,
-      params,
-    );
-    for (const r of rows) {
-      const id = Number(r.id);
-      if (id > 0) out.add(id);
-    }
-  }
-
+  const hasRelation = await tableExists("tb_people_relation");
+  let hasSibling = false;
   try {
     await ensureSiblingOrderTable();
-    const rows = await query<RowDataPacket[]>(
-      `SELECT people_id AS id
-       FROM app_sibling_order
-       WHERE parent_id IN (${ph})
-       LIMIT ${Math.max(1, Math.min(2000, limit))}`,
-      params,
-    );
-    for (const r of rows) {
-      const id = Number(r.id);
-      if (id > 0) out.add(id);
-    }
+    hasSibling = true;
   } catch {
-    /* ignore */
+    hasSibling = false;
+  }
+  if (!hasRelation && !hasSibling) return false;
+
+  const orParts: string[] = [];
+
+  if (parentId) {
+    params.scopeParentId = parentId;
+    if (hasRelation) {
+      orParts.push(
+        `EXISTS (
+          SELECT 1 FROM tb_people_relation r_sp
+          WHERE r_sp.F_PEOPLE_ID = p.F_ID AND r_sp.F_PARENT_ID = :scopeParentId
+        )`,
+      );
+    }
+    if (hasSibling) {
+      orParts.push(
+        `EXISTS (
+          SELECT 1 FROM app_sibling_order s_sp
+          WHERE s_sp.people_id = p.F_ID AND s_sp.parent_id = :scopeParentId
+        )`,
+      );
+    }
+    where.push(`(${orParts.join(" OR ")})`);
+    orParts.length = 0;
   }
 
-  return [...out];
+  if (fatherName && grandfatherName) {
+    const fMatch = personNameMatchSql("f_af.F_NAME", fatherName, "afn", params);
+    const gMatch = personNameMatchSql("gf_af.F_NAME", grandfatherName, "agn", params);
+    if (hasRelation) {
+      orParts.push(
+        `EXISTS (
+          SELECT 1 FROM tb_people_relation r_c
+          INNER JOIN tb_people f_af ON f_af.F_ID = r_c.F_PARENT_ID
+          INNER JOIN tb_people_relation r_f ON r_f.F_PEOPLE_ID = f_af.F_ID
+          INNER JOIN tb_people gf_af ON gf_af.F_ID = r_f.F_PARENT_ID
+          WHERE r_c.F_PEOPLE_ID = p.F_ID AND ${fMatch} AND ${gMatch}
+        )`,
+      );
+    }
+    if (hasSibling) {
+      const fMatchS = personNameMatchSql("f_as.F_NAME", fatherName, "asn", params);
+      const gMatchS = personNameMatchSql("gf_as.F_NAME", grandfatherName, "ags", params);
+      orParts.push(
+        `EXISTS (
+          SELECT 1 FROM app_sibling_order s_c
+          INNER JOIN tb_people f_as ON f_as.F_ID = s_c.parent_id
+          INNER JOIN app_sibling_order s_f ON s_f.people_id = f_as.F_ID
+          INNER JOIN tb_people gf_as ON gf_as.F_ID = s_f.parent_id
+          WHERE s_c.people_id = p.F_ID AND ${fMatchS} AND ${gMatchS}
+        )`,
+      );
+    }
+    if (!orParts.length) return false;
+    where.push(`(${orParts.join(" OR ")})`);
+  } else if (fatherName) {
+    const fMatch = personNameMatchSql("f_fn.F_NAME", fatherName, "fnm", params);
+    if (hasRelation) {
+      orParts.push(
+        `EXISTS (
+          SELECT 1 FROM tb_people_relation r_fn
+          INNER JOIN tb_people f_fn ON f_fn.F_ID = r_fn.F_PARENT_ID
+          WHERE r_fn.F_PEOPLE_ID = p.F_ID AND ${fMatch}
+        )`,
+      );
+    }
+    if (hasSibling) {
+      const fMatchS = personNameMatchSql("f_fs.F_NAME", fatherName, "fsm", params);
+      orParts.push(
+        `EXISTS (
+          SELECT 1 FROM app_sibling_order s_fn
+          INNER JOIN tb_people f_fs ON f_fs.F_ID = s_fn.parent_id
+          WHERE s_fn.people_id = p.F_ID AND ${fMatchS}
+        )`,
+      );
+    }
+    if (!orParts.length) return false;
+    where.push(`(${orParts.join(" OR ")})`);
+  } else if (grandfatherName) {
+    const gMatch = personNameMatchSql("gf_gn.F_NAME", grandfatherName, "gnm", params);
+    if (hasRelation) {
+      orParts.push(
+        `EXISTS (
+          SELECT 1 FROM tb_people_relation r_g2
+          INNER JOIN tb_people_relation r_g1 ON r_g1.F_PEOPLE_ID = r_g2.F_PARENT_ID
+          INNER JOIN tb_people gf_gn ON gf_gn.F_ID = r_g1.F_PARENT_ID
+          WHERE r_g2.F_PEOPLE_ID = p.F_ID AND ${gMatch}
+        )`,
+      );
+    }
+    if (hasSibling) {
+      const gMatchS = personNameMatchSql("gf_gs.F_NAME", grandfatherName, "gsm", params);
+      orParts.push(
+        `EXISTS (
+          SELECT 1 FROM app_sibling_order s_g2
+          INNER JOIN app_sibling_order s_g1 ON s_g1.people_id = s_g2.parent_id
+          INNER JOIN tb_people gf_gs ON gf_gs.F_ID = s_g1.parent_id
+          WHERE s_g2.people_id = p.F_ID AND ${gMatchS}
+        )`,
+      );
+    }
+    if (!orParts.length) return false;
+    where.push(`(${orParts.join(" OR ")})`);
+  }
+
+  return true;
 }
 
 export async function searchPeople(opts: {
@@ -324,7 +392,8 @@ export async function searchPeople(opts: {
   pageSize?: number;
 }) {
   const page = Math.max(1, opts.page || 1);
-  const pageSize = Math.min(100, Math.max(1, opts.pageSize || 10));
+  // 局域网维护场景：允许更大页以支持消歧/导出类全量拉取；列表 UI 仍可小页分页
+  const pageSize = Math.min(10000, Math.max(1, opts.pageSize || 10));
   const offset = (page - 1) * pageSize;
   const where: string[] = ["1=1"];
   const params: Record<string, unknown> = {};
@@ -364,49 +433,14 @@ export async function searchPeople(opts: {
     }
   }
 
-  // 父/祖父/指定父：先按 parent 索引收集子代 ID，再 p.F_ID IN (...)，避免 LEFT JOIN+OR 全表扫
-  let scopedPeopleIds: number[] | null = null;
-  if (opts.parentId) {
-    const kids = await findChildIdsByParentIds([Number(opts.parentId)]);
-    if (!kids.length) return { total: 0, page, pageSize, items: [] };
-    scopedPeopleIds = kids;
-  }
-  if (fatherName) {
-    const fatherIds = await findPeopleIdsByName(fatherName, 80);
-    if (!fatherIds.length) return { total: 0, page, pageSize, items: [] };
-    const kids = await findChildIdsByParentIds(fatherIds);
-    if (!kids.length) return { total: 0, page, pageSize, items: [] };
-    if (scopedPeopleIds == null) scopedPeopleIds = kids;
-    else {
-      const allow = new Set(kids);
-      scopedPeopleIds = scopedPeopleIds.filter((id) => allow.has(id));
-    }
-  }
-  if (grandfatherName) {
-    const grandfatherIds = await findPeopleIdsByName(grandfatherName, 80);
-    if (!grandfatherIds.length) return { total: 0, page, pageSize, items: [] };
-    // 祖父 → 父辈 → 本人
-    const midIds = await findChildIdsByParentIds(grandfatherIds);
-    if (!midIds.length) return { total: 0, page, pageSize, items: [] };
-    const kids = await findChildIdsByParentIds(midIds);
-    if (!kids.length) return { total: 0, page, pageSize, items: [] };
-    if (scopedPeopleIds == null) scopedPeopleIds = kids;
-    else {
-      const allow = new Set(kids);
-      scopedPeopleIds = scopedPeopleIds.filter((id) => allow.has(id));
-    }
-  }
-  if (scopedPeopleIds != null) {
-    if (!scopedPeopleIds.length) {
-      return { total: 0, page, pageSize, items: [] };
-    }
-    // 防止 IN 列表过大；父系检索结果通常远小于此
-    const capped = scopedPeopleIds.slice(0, 8000);
-    const ph = capped.map((_, i) => `:sid${i}`).join(",");
-    capped.forEach((id, i) => {
-      params[`sid${i}`] = id;
+  // 父/祖父/指定父：EXISTS 全量匹配（不截断同名候选）；列表仍按 pageSize 分页
+  {
+    const ok = await pushParentScopeExists(where, params, {
+      parentId: opts.parentId ? Number(opts.parentId) : undefined,
+      fatherName,
+      grandfatherName,
     });
-    where.push(`p.F_ID IN (${ph})`);
+    if (!ok) return { total: 0, page, pageSize, items: [] };
   }
   if (pinyin) {
     where.push(pinyinLikeClause("p.F_PINYIN", pinyin, "pinyin", params));
@@ -942,8 +976,7 @@ async function inferSiblingRankFromParent(
       `SELECT p.F_ID AS id, p.F_NO AS no, p.F_SEX AS sex
        FROM tb_people_relation r
        JOIN tb_people p ON p.F_ID = r.F_PEOPLE_ID
-       WHERE r.F_PARENT_ID = :parentId
-       LIMIT 200`,
+       WHERE r.F_PARENT_ID = :parentId`,
       { parentId },
     );
     siblings = rows.map((r) => ({
@@ -959,8 +992,7 @@ async function inferSiblingRankFromParent(
       `SELECT s.people_id AS id, p.F_NO AS no, p.F_SEX AS sex, s.sort_no
        FROM app_sibling_order s
        JOIN tb_people p ON p.F_ID = s.people_id
-       WHERE s.parent_id = :parentId
-       LIMIT 200`,
+       WHERE s.parent_id = :parentId`,
       { parentId },
     );
     const have = new Set(siblings.map((s) => s.id));
@@ -1308,16 +1340,14 @@ export async function getChildren(parentId: number) {
   if (hasRelation) {
     const relIds = await query<RowDataPacket[]>(
       `SELECT F_PEOPLE_ID AS id FROM tb_people_relation
-       WHERE F_PARENT_ID = :parentId
-       LIMIT 200`,
+       WHERE F_PARENT_ID = :parentId`,
       { parentId },
     );
     for (const r of relIds) childIdSet.add(Number(r.id));
   }
   const soIds = await query<RowDataPacket[]>(
     `SELECT people_id AS id FROM app_sibling_order
-     WHERE parent_id = :parentId
-     LIMIT 200`,
+     WHERE parent_id = :parentId`,
     { parentId },
   );
   for (const r of soIds) childIdSet.add(Number(r.id));
@@ -1346,8 +1376,7 @@ export async function getChildren(parentId: number) {
        WHERE p.F_LEFT > :left AND p.F_RIGHT < :right
          AND p.F_LEVEL = :childLevel
          AND (:flag = 0 OR p.F_FLAG = :flag)
-       ORDER BY p.F_LEFT ASC
-       LIMIT 200`,
+       ORDER BY p.F_LEFT ASC`,
       {
         left: Number(parent.F_LEFT),
         right: Number(parent.F_RIGHT),
@@ -1360,7 +1389,7 @@ export async function getChildren(parentId: number) {
 
   if (childIdSet.size === 0) return [];
 
-  const childIds = [...childIdSet].slice(0, 200);
+  const childIds = [...childIdSet];
   const placeholders = childIds.map(() => "?").join(",");
   const rows = await query<PeopleDb[]>(
     `SELECT ${liteSelect},
@@ -2372,8 +2401,7 @@ async function loadPendingCreates(
            OR CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.asParentOf')) AS SIGNED) IN (${placeholders})
          )
          ${excludeSql}
-       ORDER BY id ASC
-       LIMIT 80`,
+       ORDER BY id ASC`,
       params,
     );
     const nextAnchors: number[] = [];
@@ -2392,14 +2420,8 @@ async function loadPendingCreates(
 
 type FlatNode = PeopleRow & { left: number; right: number };
 
-/**
- * 世系图节点预算：超过则截断，避免宽谱把整支派拉爆。
- * nested-set 单次拉取上限（仅用于区间较小的根）。
- */
-const LINEAGE_NODE_BUDGET = 400;
-/** nested-set 区间超过此值则改走关系表 BFS，避免大范围扫表 */
+/** nested-set 区间超过此值则改走关系表 BFS（策略切换，非结果截断） */
 const LINEAGE_NESTED_SPAN_MAX = 800;
-const LINEAGE_DESCENDANT_ROW_LIMIT = 800;
 
 function buildTreeFromFlat(
   rootId: number,
@@ -2483,7 +2505,7 @@ const LINEAGE_LITE_SELECT = `p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_G
             NULL AS F_PROFESSIONAL_TITLE, NULL AS F_COLLEGE, NULL AS F_DEGREE,
             0 AS child_count`;
 
-/** 批量按父节点取子代（relation + sibling_order），每父最多 80 人 */
+/** 批量按父节点取子代（relation + sibling_order），不截断子代数 */
 async function batchChildrenByParents(
   parentIds: number[],
   maxLevel: number,
@@ -2509,14 +2531,13 @@ async function batchChildrenByParents(
        JOIN tb_people p ON p.F_ID = r.F_PEOPLE_ID
        WHERE r.F_PARENT_ID IN (${ph})
          AND (p.F_LEVEL IS NULL OR p.F_LEVEL <= :maxLevel)
-       ORDER BY r.F_PARENT_ID ASC, p.F_LEFT ASC, p.F_ID ASC
-       LIMIT 2000`,
+       ORDER BY r.F_PARENT_ID ASC, p.F_LEFT ASC, p.F_ID ASC`,
       params,
     );
     for (const r of rows) {
       const pid = Number(r.F_PARENT_ID);
       const arr = map.get(pid);
-      if (!arr || arr.length >= 80) continue;
+      if (!arr) continue;
       arr.push(mapRow(r));
     }
   }
@@ -2528,14 +2549,13 @@ async function batchChildrenByParents(
      JOIN tb_people p ON p.F_ID = s.people_id
      WHERE s.parent_id IN (${ph})
        AND (p.F_LEVEL IS NULL OR p.F_LEVEL <= :maxLevel)
-     ORDER BY s.parent_id ASC, s.sort_no ASC, p.F_ID ASC
-     LIMIT 500`,
+     ORDER BY s.parent_id ASC, s.sort_no ASC, p.F_ID ASC`,
     params,
   );
   for (const r of soRows) {
     const pid = Number(r.F_PARENT_ID);
     const arr = map.get(pid);
-    if (!arr || arr.length >= 80) continue;
+    if (!arr) continue;
     const kid = mapRow(r);
     if (arr.some((x) => x.id === kid.id)) continue;
     arr.push(kid);
@@ -2550,7 +2570,7 @@ async function batchChildrenByParents(
 }
 
 /**
- * 按关系表 BFS 建宽谱：每层一次批量查询，有节点预算，避免递归 N+1。
+ * 按关系表 BFS 建宽谱：每层一次批量查询，按代数上限展开全部子代。
  */
 async function buildWideTreeBatched(
   root: PeopleRow,
@@ -2561,9 +2581,8 @@ async function buildWideTreeBatched(
   relatedIds.add(root.id);
   const nodeMap = new Map<number, LineageNode>([[root.id, rootNode]]);
   let frontier = [root.id];
-  let total = 1;
 
-  while (frontier.length && total < LINEAGE_NODE_BUDGET) {
+  while (frontier.length) {
     const parents = frontier.filter((id) => {
       const n = nodeMap.get(id);
       return n && Number(n.level ?? 0) < maxLevel;
@@ -2578,7 +2597,6 @@ async function buildWideTreeBatched(
       const kids = kidsMap.get(pid) || [];
       parentNode.children = [];
       for (let idx = 0; idx < kids.length; idx++) {
-        if (total >= LINEAGE_NODE_BUDGET) break;
         const k = kids[idx];
         if (Number(k.level ?? 0) > maxLevel) continue;
         relatedIds.add(k.id);
@@ -2586,7 +2604,6 @@ async function buildWideTreeBatched(
         if (!child) {
           child = toLineageNode(k);
           nodeMap.set(k.id, child);
-          total += 1;
           if (Number(k.level ?? 0) < maxLevel) frontier.push(k.id);
         }
         child.rank = k.rank || rankLabelTraditional(k.sex, idx);
@@ -2617,7 +2634,7 @@ async function expandLineageTreeChildren(
   const fetched = new Set<number>();
   const CHUNK = 30;
 
-  while (frontier.length && relatedIds.size < LINEAGE_NODE_BUDGET) {
+  while (frontier.length) {
     const parents = [...new Set(frontier)].filter((id) => !fetched.has(id));
     frontier = [];
     if (!parents.length) break;
@@ -2644,7 +2661,6 @@ async function expandLineageTreeChildren(
         if (Number(k.level ?? 0) > maxLevel) continue;
         let child = byId.get(k.id);
         if (!child) {
-          if (relatedIds.size >= LINEAGE_NODE_BUDGET) break;
           child = toLineageNode(k);
           relatedIds.add(k.id);
         }
@@ -2705,8 +2721,7 @@ async function fetchLineageFlatLite(
      WHERE p.F_FLAG = :flag
        AND p.F_LEFT >= :l AND p.F_RIGHT <= :r
        AND p.F_LEVEL <= :maxLevel
-     ORDER BY p.F_LEFT ASC
-     LIMIT ${LINEAGE_DESCENDANT_ROW_LIMIT}`,
+     ORDER BY p.F_LEFT ASC`,
     { l: bounds.l, r: bounds.r, maxLevel, flag: bounds.flag },
   );
   const mapped: FlatNode[] = rows.map((r) => ({
@@ -2861,13 +2876,12 @@ export async function getLineageTree(
   };
 }
 
-function groupByGeneration(people: PeopleRow[], maxPerGen = 24) {
+function groupByGeneration(people: PeopleRow[]) {
   const gens = new Map<number, PeopleRow[]>();
   for (const p of people) {
     const lv = p.level ?? 0;
     if (!gens.has(lv)) gens.set(lv, []);
-    const arr = gens.get(lv)!;
-    if (arr.length < maxPerGen) arr.push(p);
+    gens.get(lv)!.push(p);
   }
   return [...gens.entries()]
     .sort((a, b) => a[0] - b[0])
@@ -2898,17 +2912,12 @@ export async function getPeersChart(id: number) {
       AND p.F_LEFT >= focus.F_LEFT AND p.F_RIGHT <= focus.F_RIGHT
      WHERE focus.F_ID = :id
        AND p.F_LEVEL BETWEEN :minLevel AND :maxLevel
-     ORDER BY p.F_LEVEL ASC, p.F_NO ASC, p.F_ID ASC
-     LIMIT 160`,
+     ORDER BY p.F_LEVEL ASC, p.F_NO ASC, p.F_ID ASC`,
     { id, minLevel, maxLevel },
   );
 
   if (rows.length < 2) {
-    const people = [
-      ...ancestors,
-      focus,
-      ...(await getChildren(focus.id)).slice(0, 40),
-    ];
+    const people = [...ancestors, focus, ...(await getChildren(focus.id))];
     return { focus, generations: groupByGeneration(people) };
   }
 

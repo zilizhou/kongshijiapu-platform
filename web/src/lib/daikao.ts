@@ -481,7 +481,13 @@ export async function resolveOfficialParent(
       parentCandidates: [],
     };
   }
-  const found = await searchPeople({ name: parentName, page: 1, pageSize: 50 });
+  // 消歧需看全量同名，不能只取前 N 条
+  const found = await searchPeople({
+    name: parentName,
+    exactName: true,
+    page: 1,
+    pageSize: 5000,
+  });
   const variants = new Set(searchTextVariants(parentName));
   const exact = found.items.filter((x) => variants.has(x.name));
   const list = (exact.length ? exact : found.items).map((p) => ({
