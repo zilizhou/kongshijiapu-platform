@@ -497,7 +497,7 @@ export async function updateRequestDraft(
       ? "draft"
       : req.status;
   const submittedAtSql = submit ? "NOW()" : "submitted_at";
-  await execute(
+  await query(
     `UPDATE app_change_requests SET
       payload = CAST(:payload AS JSON),
       status = :status,
@@ -543,7 +543,8 @@ export async function reviewerSave(
   if (!req) throw new Error("变更单不存在");
   assertCanReview(user, req.status);
   const trad = normalizePayload(req.objectType, payload);
-  await execute(
+  // 用 query 而非 execute：部分环境下预处理语句 + CAST(? AS JSON) 不稳定
+  await query(
     `UPDATE app_change_requests SET
       payload = CAST(:payload AS JSON),
       last_actor_id = :actorId,
@@ -560,7 +561,17 @@ export async function reviewerSave(
   return getRequestById(id);
 }
 
-export async function approveRequest(id: number, user: SessionUser) {
+/**
+ * 审核通过。若带 payload，先按审核员修改落库再推进/终审，避免浏览器「先 PATCH 再 approve」两段请求被打断。
+ */
+export async function approveRequest(
+  id: number,
+  user: SessionUser,
+  opts?: { payload?: ChangePayload },
+) {
+  if (opts?.payload) {
+    await reviewerSave(id, user, opts.payload);
+  }
   const req = await getRequestById(id);
   if (!req) throw new Error("变更单不存在");
   assertCanReview(user, req.status);

@@ -55,10 +55,9 @@ export function PersonPicker({
           const status = String(d.item?.status || "");
           const objectId = d.item?.objectId != null ? Number(d.item.objectId) : 0;
           if (status === "approved" && objectId > 0) {
-            // 父单已通过：升为正 ID（详情接口一般已 hydrate；此处作兜底）
+            // 仅展示姓名；正 ID 升格由详情 hydrate 完成，避免此处 onChange 误标 dirty
             setDisplayName(name);
             setKeyword("");
-            if (valueId < 0) onChange(objectId);
             return;
           }
           const statusHint =

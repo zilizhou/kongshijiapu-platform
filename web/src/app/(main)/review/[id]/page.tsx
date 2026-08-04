@@ -141,22 +141,15 @@ export default function ReviewDetailPage() {
     setBusy(true);
     setError("");
     try {
-      if (dirty) {
-        const saveRes = await fetch(`/api/requests/${params.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ payload, asReviewer: true }),
-        });
-        const saveData = await readJson(saveRes);
-        if (!saveRes.ok) throw new Error(String(saveData.error || "保存失败"));
-        if (saveData.item) setItem(saveData.item as ChangeRequest);
-        setDirty(false);
-      }
+      // 有修改时把 payload 一并交给 approve，服务端先保存再通过（单次请求，避免两段 fetch 被失焦/中断）
       const res = await fetch(`/api/requests/${params.id}/approve`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dirty ? { payload } : {}),
       });
       const data = await readJson(res);
       if (!res.ok) throw new Error(String(data.error || "通过失败"));
+      setDirty(false);
       router.replace("/review");
     } catch (e) {
       setError(networkErrorMessage(e, "通过失败"));

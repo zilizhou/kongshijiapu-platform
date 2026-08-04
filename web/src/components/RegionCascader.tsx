@@ -239,13 +239,18 @@ export function RegionCascader({
             const v = e.target.value;
             setTyped(v);
             setOpen(true);
+            // 输入即回写，避免点「保存并通过」时因防失焦未触发 blur 导致未落盘
+            skipSync.current = true;
+            onChange(v);
           }}
           onFocus={() => {
             if (typed.trim()) setOpen(true);
           }}
           onBlur={() => {
-            // 失焦时提交输入（结构化或原文）
+            // 失焦时再规范化为省/市/区结构
             if (typed.trim() !== (value || "").trim()) {
+              applyTypedAddress(typed);
+            } else if (typed.trim()) {
               applyTypedAddress(typed);
             }
           }}
