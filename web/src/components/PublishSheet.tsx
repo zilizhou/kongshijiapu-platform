@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -134,10 +135,51 @@ function pagesSignature(pages: FlatEntry[][]): string {
 function computePreviewScale(paper: PaperSize): number {
   if (typeof window === "undefined") return 0.55;
   const { widthPx, heightPx } = paperSizePx(paper);
-  // 右侧结果区大致可用空间（扣侧栏、页头）
-  const maxW = Math.min(720, Math.max(240, window.innerWidth - 380));
-  const maxH = Math.min(920, Math.max(320, window.innerHeight - 180));
+  // 翻页区：扣侧栏与翻页按钮
+  const maxW = Math.min(640, Math.max(220, window.innerWidth - 460));
+  const maxH = Math.min(780, Math.max(280, window.innerHeight - 260));
   return Math.min(1, maxW / widthPx, maxH / heightPx);
+}
+
+function PageSheet({
+  title,
+  pageIndex,
+  pageCount,
+  entries,
+  paperTag,
+  showLabel,
+}: {
+  title: string;
+  pageIndex: number;
+  pageCount: number;
+  entries: FlatEntry[];
+  paperTag: string;
+  showLabel?: boolean;
+}) {
+  return (
+    <div className="publish-page-outer">
+      <section className="publish-page">
+        <aside className="publish-spine">
+          <div className="publish-spine-inner whitespace-pre-line">{title}</div>
+          <div className="publish-spine-level">
+            第{pageIndex + 1}/{pageCount}页
+          </div>
+        </aside>
+        <div className="publish-frame">
+          <div className="publish-body publish-body-paged">
+            {entries.map((entry) => (
+              <PersonStrip key={`${pageIndex}-${entry.id}`} entry={entry} />
+            ))}
+          </div>
+        </div>
+      </section>
+      {showLabel ? (
+        <div className="publish-page-label no-print">
+          第 {pageIndex + 1} / {pageCount} 页 · {paperTag}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function PublishSheet({
@@ -159,6 +201,7 @@ export function PublishSheet({
   const pagesSigRef = useRef("");
   const [pages, setPages] = useState<FlatEntry[][]>([]);
   const [previewScale, setPreviewScale] = useState(0.55);
+  const [pageIndex, setPageIndex] = useState(0);
   const paperKey = `${paper.widthMm}x${paper.heightMm}`;
   const typeKey = typographyKey(typography);
   const layoutKey = `${paperKey}_${font.id}_${typeKey}`;
@@ -239,14 +282,13 @@ export function PublishSheet({
         sorted[0] ||
         40;
 
-      const gapPx = 18;
       const next = packPages(
         flat,
         heights,
         personWidth,
         pageWidth,
         pageHeight,
-        gapPx,
+        18,
       );
       const sig = pagesSignature(next);
       if (sig !== pagesSigRef.current) {
@@ -278,33 +320,76 @@ export function PublishSheet({
     };
   }, [flat, layoutKey, paper]);
 
+  const displayPages = pages.length ? pages : flat.length ? [flat] : [];
+  const pageCount = Math.max(1, displayPages.length);
+
+  useEffect(() => {
+    setPageIndex(0);
+  }, [layoutKey, data?.total, data?.subtitle]);
+
+  useEffect(() => {
+    setPageIndex((i) => Math.min(i, Math.max(0, pageCount - 1)));
+  }, [pageCount]);
+
+  useEffect(() => {
+    if (!data || !displayPages.length) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        setPageIndex((i) => Math.max(0, i - 1));
+      } else if (e.key === "ArrowRight" || e.key === "PageDown") {
+        e.preventDefault();
+        setPageIndex((i) => Math.min(pageCount - 1, i + 1));
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        setPageIndex(0);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        setPageIndex(pageCount - 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [data, displayPages.length, pageCount]);
+
   if (!data) {
     return (
-      <div className="flex min-h-[420px] items-center justify-center rounded-xl border border-dashed border-line bg-soft/50 px-6 py-10 text-center text-sm text-muted">
+      <div className="flex min-h-[280px] flex-1 items-center justify-center rounded-xl border border-dashed border-line bg-soft/50 px-6 py-10 text-center text-sm text-muted">
         {emptyHint ||
           "在左侧选择查询方式并点击查询，即可生成世系表用于打印或另存 PDF。"}
       </div>
     );
   }
 
-  const displayPages = pages.length ? pages : [flat];
   const paperTag = `${paper.label} ${paper.widthMm}×${paper.heightMm}mm`;
+  const safeIndex = Math.min(pageIndex, pageCount - 1);
+  const currentEntries = displayPages[safeIndex] || [];
 
   return (
-    <div className="publish-root" style={rootStyle}>
+    <div className="publish-root flex min-h-0 flex-1 flex-col" style={rootStyle}>
       <style
         dangerouslySetInnerHTML={{
           __html: `@media print {\n${printCss}\n}`,
         }}
       />
-      <div className="publish-meta no-print mb-3 text-sm text-muted">
-        {data.subtitle} · 共 {data.total} 人 · {displayPages.length} 页 ·{" "}
-        {paperTag} · {font.label} · {typographySummary(typography)}
+      <div className="publish-meta no-print mb-3 shrink-0 text-sm text-muted">
+        {data.subtitle} · 共 {data.total} 人 · {pageCount} 页 · {paperTag} ·{" "}
+        {font.label} · {typographySummary(typography)}
         <span className="mt-1 block text-xs">
-          预览按真实纸张比例缩小显示；打印时请选「边距：无」，纸张选{" "}
+          预览按真实纸张比例缩小；可用左右箭头或底部按钮翻页。打印时请选「边距：无」，纸张选{" "}
           {paper.label}
           {paper.id === "custom"
-            ? `（自定义 ${paper.widthMm}×${paper.heightMm}mm）`
+            ? `（${paper.widthMm}×${paper.heightMm}mm）`
             : ""}
           。
         </span>
@@ -323,37 +408,97 @@ export function PublishSheet({
         </section>
       </div>
 
-      <div className="publish-pages">
-        {displayPages.map((pageEntries, pageIndex) => (
-          <div
-            key={`outer-${pageIndex}-${layoutKey}`}
-            className="publish-page-outer"
+      {/* 屏显：左右翻页 */}
+      <div className="publish-flip no-print flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 items-center justify-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            className="publish-flip-nav shrink-0 rounded-lg border border-line bg-white px-2.5 py-8 text-lg text-ink shadow-sm hover:bg-soft disabled:cursor-not-allowed disabled:opacity-35 sm:px-3"
+            disabled={safeIndex <= 0}
+            onClick={() => setPageIndex((i) => Math.max(0, i - 1))}
+            aria-label="上一页"
+            title="上一页（←）"
           >
-            <section className="publish-page">
-              <aside className="publish-spine">
-                <div className="publish-spine-inner whitespace-pre-line">
-                  {data.title}
-                </div>
-                <div className="publish-spine-level">
-                  第{pageIndex + 1}/{displayPages.length}页
-                </div>
-              </aside>
+            ‹
+          </button>
 
-              <div className="publish-frame">
-                <div className="publish-body publish-body-paged">
-                  {pageEntries.map((entry) => (
-                    <PersonStrip
-                      key={`${pageIndex}-${entry.id}`}
-                      entry={entry}
-                    />
-                  ))}
-                </div>
-              </div>
-            </section>
-            <div className="publish-page-label no-print">
-              第 {pageIndex + 1} / {displayPages.length} 页 · {paperTag}
-            </div>
+          <div className="publish-flip-stage flex min-w-0 flex-1 flex-col items-center justify-center overflow-auto py-1">
+            <PageSheet
+              title={data.title}
+              pageIndex={safeIndex}
+              pageCount={pageCount}
+              entries={currentEntries}
+              paperTag={paperTag}
+              showLabel
+            />
           </div>
+
+          <button
+            type="button"
+            className="publish-flip-nav shrink-0 rounded-lg border border-line bg-white px-2.5 py-8 text-lg text-ink shadow-sm hover:bg-soft disabled:cursor-not-allowed disabled:opacity-35 sm:px-3"
+            disabled={safeIndex >= pageCount - 1}
+            onClick={() =>
+              setPageIndex((i) => Math.min(pageCount - 1, i + 1))
+            }
+            aria-label="下一页"
+            title="下一页（→）"
+          >
+            ›
+          </button>
+        </div>
+
+        <div className="mt-2 flex shrink-0 flex-wrap items-center justify-center gap-3 pb-1 text-sm">
+          <button
+            type="button"
+            className="rounded-md border border-line bg-white px-3 py-1.5 text-muted hover:bg-soft disabled:opacity-40"
+            disabled={safeIndex <= 0}
+            onClick={() => setPageIndex(0)}
+          >
+            首页
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-line bg-white px-3 py-1.5 text-muted hover:bg-soft disabled:opacity-40"
+            disabled={safeIndex <= 0}
+            onClick={() => setPageIndex((i) => Math.max(0, i - 1))}
+          >
+            上一页
+          </button>
+          <span className="min-w-[7rem] text-center font-medium text-ink">
+            第 {safeIndex + 1} / {pageCount} 页
+          </span>
+          <button
+            type="button"
+            className="rounded-md border border-line bg-white px-3 py-1.5 text-muted hover:bg-soft disabled:opacity-40"
+            disabled={safeIndex >= pageCount - 1}
+            onClick={() =>
+              setPageIndex((i) => Math.min(pageCount - 1, i + 1))
+            }
+          >
+            下一页
+          </button>
+          <button
+            type="button"
+            className="rounded-md border border-line bg-white px-3 py-1.5 text-muted hover:bg-soft disabled:opacity-40"
+            disabled={safeIndex >= pageCount - 1}
+            onClick={() => setPageIndex(pageCount - 1)}
+          >
+            末页
+          </button>
+        </div>
+      </div>
+
+      {/* 打印：全部页（屏上隐藏） */}
+      <div className="publish-pages publish-print-stack" aria-hidden>
+        {displayPages.map((pageEntries, idx) => (
+          <PageSheet
+            key={`print-${idx}-${layoutKey}`}
+            title={data.title}
+            pageIndex={idx}
+            pageCount={pageCount}
+            entries={pageEntries}
+            paperTag={paperTag}
+          />
         ))}
       </div>
     </div>

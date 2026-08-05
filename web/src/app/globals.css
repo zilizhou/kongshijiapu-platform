@@ -140,6 +140,21 @@ h3,
   gap: 1.5rem;
 }
 
+/* 屏显仅翻页预览；全页栈专供打印 */
+.publish-print-stack {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.publish-flip-stage .publish-page-outer {
+  margin-bottom: 1.35rem;
+}
+
 /* 屏显：外壳只占缩放后的尺寸，内部纸面按真实 mm/px 再 scale */
 .publish-page-outer {
   width: calc(var(--pub-page-w) * var(--pub-preview-scale));
@@ -384,6 +399,7 @@ h3,
   .publish-page-header,
   .publish-meta,
   .publish-measure,
+  .publish-flip,
   .publish-page-label {
     display: none !important;
     visibility: hidden !important;
@@ -403,13 +419,21 @@ h3,
     background: transparent !important;
     border-radius: 0 !important;
     overflow: visible !important;
+    max-height: none !important;
   }
 
-  .publish-pages {
+  .publish-pages,
+  .publish-print-stack {
     position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
     display: block !important;
     gap: 0 !important;
     align-items: stretch !important;
+    pointer-events: auto !important;
   }
 
   .publish-page-outer {

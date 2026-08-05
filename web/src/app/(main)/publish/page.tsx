@@ -406,8 +406,8 @@ export default function PublishPage() {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <Card className="publish-query-panel no-print h-fit space-y-4 p-5">
+      <div className="grid items-start gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <Card className="publish-query-panel no-print h-fit max-h-[calc(100vh-5.5rem)] space-y-4 overflow-y-auto p-5 lg:sticky lg:top-4">
           <div className="font-display text-lg text-ink">查询条件</div>
 
           <div className="inline-flex overflow-hidden rounded-lg border border-line text-sm">
@@ -911,7 +911,7 @@ export default function PublishPage() {
           {error ? <p className="text-sm text-danger">{error}</p> : null}
         </Card>
 
-        <Card className="publish-result-card overflow-hidden p-5">
+        <Card className="publish-result-card min-w-0 overflow-hidden p-5">
           {showNamePicker ? (
             <div className="no-print space-y-3">
               <div className="flex flex-wrap items-end justify-between gap-2">

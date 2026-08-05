@@ -91,14 +91,20 @@ html, body {
   --pub-page-h: ${h}mm;
   --pub-preview-scale: 1;
 }
-.publish-pages {
+.publish-pages,
+.publish-print-stack {
   position: static !important;
+  left: auto !important;
+  top: auto !important;
   display: block !important;
   width: ${w}mm !important;
+  height: auto !important;
   gap: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
+  overflow: visible !important;
   align-items: stretch !important;
+  pointer-events: auto !important;
 }
 .publish-page,
 .publish-page-outer {
