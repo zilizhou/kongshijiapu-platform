@@ -50,7 +50,7 @@ function Stepper({
           −
         </button>
         <input
-          className="w-10 border-x border-line py-1.5 text-center outline-none"
+          className="w-12 border-x border-line py-1.5 text-center outline-none"
           value={value}
           onChange={(e) => {
             const n = Number(e.target.value.replace(/\D/g, ""));
@@ -74,8 +74,8 @@ function Stepper({
 function YiziInner() {
   const params = useParams<{ id: string }>();
   const search = useSearchParams();
-  const initUp = Math.min(20, Math.max(0, Number(search.get("up") || 1)));
-  const initDown = Math.min(20, Math.max(0, Number(search.get("down") || 1)));
+  const initUp = Math.min(100, Math.max(0, Number(search.get("up") || 1)));
+  const initDown = Math.min(30, Math.max(0, Number(search.get("down") || 1)));
   const [up, setUp] = useState(initUp);
   const [down, setDown] = useState(initDown);
   const [queryUp, setQueryUp] = useState(initUp);
@@ -178,12 +178,12 @@ function YiziInner() {
 
       <Card className="mb-4 p-4">
         <div className="flex flex-wrap items-center gap-4">
-          <Stepper label="向上代数" value={up} min={0} max={20} onChange={setUp} />
+          <Stepper label="向上代数" value={up} min={0} max={100} onChange={setUp} />
           <Stepper
             label="向下代数"
             value={down}
             min={0}
-            max={20}
+            max={30}
             onChange={setDown}
           />
           <Button
@@ -248,9 +248,6 @@ function YiziInner() {
                       {p.sex} · 第{p.level ?? "?"}世
                       {p.rank ? ` · ${p.rank}` : ""}
                     </span>
-                    {p.no ? (
-                      <span className="text-[10px] text-white/75">{p.no}</span>
-                    ) : null}
                   </button>
                   {!isLast ? (
                     <div className="flex flex-col items-center py-1">

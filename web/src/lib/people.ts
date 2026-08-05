@@ -3074,8 +3074,9 @@ export async function getYiziLine(
   id: number,
   opts?: { up?: number; down?: number },
 ): Promise<YiziPayload | null> {
-  const up = Math.min(20, Math.max(0, opts?.up ?? 1));
-  const down = Math.min(20, Math.max(0, opts?.down ?? 1));
+  // 孔氏可上溯至第 1 世（孔子），向上允许到 100 代；向下保留合理上限
+  const up = Math.min(100, Math.max(0, opts?.up ?? 1));
+  const down = Math.min(30, Math.max(0, opts?.down ?? 1));
   const cacheKey = `${id}:${up}:${down}`;
   const hit = yiziCache.get(cacheKey);
   if (hit && Date.now() - hit.at < 60_000) return hit.data;
