@@ -97,6 +97,31 @@ function dash(v: string | null | undefined) {
   return v && String(v).trim() ? String(v) : "-";
 }
 
+/** 另存 PDF 时浏览器常用 document.title 作为默认文件名 */
+function sanitizePrintFileStem(s: string) {
+  const cleaned = s
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+  return cleaned || "孔氏家谱_世系表";
+}
+
+function buildPrintDocumentTitle(
+  data: PublishPayload,
+  opts?: { personName?: string; group?: string },
+) {
+  if (data.mode === "person") {
+    const fromSub = data.subtitle.match(/「([^」]+)」/)?.[1]?.trim();
+    const name = fromSub || opts?.personName?.trim() || "人物";
+    return sanitizePrintFileStem(`孔氏家谱_${name}`);
+  }
+  const fromSub = data.subtitle.match(/「([^」]+)」/)?.[1]?.trim();
+  const branch = fromSub || opts?.group?.trim() || data.title || "派户支";
+  return sanitizePrintFileStem(`孔氏家谱_${branch}`);
+}
+
 function includesCI(hay: string | null | undefined, needle: string) {
   const n = needle.trim().toLowerCase();
   if (!n) return true;
@@ -386,8 +411,11 @@ export default function PublishPage() {
               <Button
                 onClick={() => {
                   const prev = document.title;
-                  // 尽量减少浏览器页眉里的站点标题
-                  document.title = " ";
+                  // 另存 PDF 时浏览器多用 title 作默认文件名（人物姓名或派户支）
+                  document.title = buildPrintDocumentTitle(data, {
+                    personName,
+                    group,
+                  });
                   const restore = () => {
                     document.title = prev;
                     window.removeEventListener("afterprint", restore);
@@ -395,7 +423,7 @@ export default function PublishPage() {
                   window.addEventListener("afterprint", restore);
                   window.print();
                   // 部分浏览器不触发 afterprint，稍后还原
-                  window.setTimeout(restore, 1000);
+                  window.setTimeout(restore, 1500);
                 }}
                 disabled={loading}
               >
