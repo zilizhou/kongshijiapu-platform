@@ -179,11 +179,17 @@ h3,
 }
 
 .publish-spine {
-  writing-mode: vertical-rl;
+  /* 外层横向布局：窄栏内上标题、下页码，避免竖排多列把页码裁掉 */
+  writing-mode: horizontal-tb;
   flex: 0 0 var(--pub-spine-width, 2.75rem);
   width: var(--pub-spine-width, 2.75rem);
   max-width: var(--pub-spine-width, 2.75rem);
-  padding: 1rem 0.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  min-height: 0;
+  padding: 0.85rem 0.2rem 0.75rem;
   border-right: 3px double var(--pub-rule);
   font-family: var(--pub-font-family);
   font-size: var(--pub-spine, 14px);
@@ -193,10 +199,27 @@ h3,
   overflow: hidden;
 }
 
+.publish-spine-inner {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-align: start;
+  line-height: 1.25;
+}
+
 .publish-spine-level {
-  margin-block-start: 1.25rem;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  flex: 0 0 auto;
+  margin-top: 0.85rem;
+  max-width: 100%;
   font-size: calc(1em * var(--pub-page-ratio, 0.9));
-  opacity: 0.85;
+  opacity: 0.9;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
 }
 
 .publish-frame {
