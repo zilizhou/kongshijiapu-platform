@@ -21,6 +21,21 @@ import {
   type PaperPresetId,
 } from "@/lib/paper";
 import type { PublishPayload } from "@/lib/publish";
+import {
+  clampDetailRem,
+  clampNameRatio,
+  clampScale,
+  clampSpinePx,
+  DEFAULT_FONT,
+  DEFAULT_TYPOGRAPHY,
+  PUBLISH_FONTS,
+  SCALE_PRESETS,
+  matchScalePreset,
+  normalizeTypography,
+  resolvePublishFont,
+  type PublishFontId,
+  type PublishTypography,
+} from "@/lib/publishType";
 import type { PeopleRow } from "@/lib/types";
 
 type Mode = "person" | "branch";
@@ -179,6 +194,16 @@ export default function PublishPage() {
   const [paperPreset, setPaperPreset] = useState<PaperPresetId>("A4");
   const [customPaperW, setCustomPaperW] = useState(String(DEFAULT_PAPER.widthMm));
   const [customPaperH, setCustomPaperH] = useState(String(DEFAULT_PAPER.heightMm));
+  /** 出版物字体 */
+  const [fontId, setFontId] = useState<PublishFontId>(DEFAULT_FONT.id);
+  /** 字号：整体缩放 + 小传/姓名/书脊分项 */
+  const [typeScale, setTypeScale] = useState(DEFAULT_TYPOGRAPHY.scale);
+  const [customScalePct, setCustomScalePct] = useState("100");
+  const [scaleIsCustom, setScaleIsCustom] = useState(false);
+  const [detailRem, setDetailRem] = useState(DEFAULT_TYPOGRAPHY.detailRem);
+  const [nameRatio, setNameRatio] = useState(DEFAULT_TYPOGRAPHY.nameRatio);
+  const [spinePx, setSpinePx] = useState(DEFAULT_TYPOGRAPHY.spinePx);
+  const [showTypeDetail, setShowTypeDetail] = useState(false);
   const [data, setData] = useState<PublishPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -188,6 +213,22 @@ export default function PublishPage() {
     () => resolvePaperSize(paperPreset, customPaperW, customPaperH),
     [paperPreset, customPaperW, customPaperH],
   );
+
+  const font = useMemo(() => resolvePublishFont(fontId), [fontId]);
+
+  const typography = useMemo(
+    (): PublishTypography =>
+      normalizeTypography({
+        scale: typeScale,
+        detailRem,
+        nameRatio,
+        spinePx,
+        pageRatio: DEFAULT_TYPOGRAPHY.pageRatio,
+      }),
+    [typeScale, detailRem, nameRatio, spinePx],
+  );
+
+  const scalePreset = scaleIsCustom ? "custom" : matchScalePreset(typeScale);
 
   const selected = nameHits.find((h) => h.id === personId) || null;
 
@@ -304,6 +345,14 @@ export default function PublishPage() {
     setPaperPreset("A4");
     setCustomPaperW(String(DEFAULT_PAPER.widthMm));
     setCustomPaperH(String(DEFAULT_PAPER.heightMm));
+    setFontId(DEFAULT_FONT.id);
+    setTypeScale(DEFAULT_TYPOGRAPHY.scale);
+    setCustomScalePct("100");
+    setScaleIsCustom(false);
+    setDetailRem(DEFAULT_TYPOGRAPHY.detailRem);
+    setNameRatio(DEFAULT_TYPOGRAPHY.nameRatio);
+    setSpinePx(DEFAULT_TYPOGRAPHY.spinePx);
+    setShowTypeDetail(false);
     setData(null);
     setError("");
     setQueried(false);
@@ -314,7 +363,7 @@ export default function PublishPage() {
       <div className="publish-page-header no-print">
         <PageHeader
           title="家谱出版"
-          desc="按人物或派户支生成传统竖排世系表，可选 A4 / B5 等纸张或自定义尺寸，再打印或另存 PDF。"
+          desc="按人物或派户支生成传统竖排世系表，可选纸张、字体与字号，再打印或另存 PDF。"
           actions={
             data ? (
               <Button
@@ -612,6 +661,162 @@ export default function PublishPage() {
               <p className="mt-1.5 text-xs text-muted">
                 范围 80–420mm · 当前 {paper.widthMm}×{paper.heightMm}mm（竖版）
               </p>
+            ) : null}
+          </div>
+
+          <div>
+            <Label>字体</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              {PUBLISH_FONTS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  title={f.hint}
+                  className={`rounded-lg border px-3 py-1.5 text-sm ${
+                    fontId === f.id
+                      ? "border-[#5b8fd9] bg-[#5b8fd9] text-white"
+                      : "border-line bg-white text-muted hover:bg-soft"
+                  }`}
+                  style={{ fontFamily: f.family }}
+                  onClick={() => setFontId(f.id)}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-muted">
+              {font.hint} · 实际显示取决于本机是否安装对应字体
+            </p>
+          </div>
+
+          <div>
+            <Label>字号</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              {SCALE_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`rounded-lg border px-3 py-1.5 text-sm ${
+                    scalePreset === p.id
+                      ? "border-[#5b8fd9] bg-[#5b8fd9] text-white"
+                      : "border-line bg-white text-muted hover:bg-soft"
+                  }`}
+                  onClick={() => {
+                    setScaleIsCustom(false);
+                    setTypeScale(p.scale);
+                    setCustomScalePct(String(Math.round(p.scale * 100)));
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`rounded-lg border px-3 py-1.5 text-sm ${
+                  scalePreset === "custom"
+                    ? "border-[#5b8fd9] bg-[#5b8fd9] text-white"
+                    : "border-line bg-white text-muted hover:bg-soft"
+                }`}
+                onClick={() => {
+                  setScaleIsCustom(true);
+                  setCustomScalePct(String(Math.round(typeScale * 100)));
+                }}
+              >
+                自定义
+              </button>
+              {scalePreset === "custom" ? (
+                <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
+                  <input
+                    className="w-12 bg-transparent text-center text-sm outline-none"
+                    value={customScalePct}
+                    inputMode="numeric"
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\D/g, "");
+                      setCustomScalePct(raw);
+                      if (raw) setTypeScale(clampScale(Number(raw) / 100));
+                    }}
+                  />
+                  <span className="text-xs text-muted">%</span>
+                </div>
+              ) : null}
+            </div>
+            <p className="mt-1.5 text-xs text-muted">
+              整体 {Math.round(typeScale * 100)}% · 姓名、小传、书脊一并缩放
+            </p>
+            <button
+              type="button"
+              className="mt-1.5 text-xs text-[#5b8fd9] hover:underline"
+              onClick={() => setShowTypeDetail((v) => !v)}
+            >
+              {showTypeDetail ? "收起分项调节" : "分项调节（小传 / 姓名 / 书脊）"}
+            </button>
+            {showTypeDetail ? (
+              <div className="mt-2 space-y-2 rounded-lg border border-line bg-soft/40 p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-muted">小传基准</span>
+                  <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
+                    <input
+                      className="w-14 bg-transparent text-center outline-none"
+                      value={String(detailRem)}
+                      inputMode="decimal"
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, "");
+                        if (!v) return;
+                        setDetailRem(clampDetailRem(Number(v)));
+                      }}
+                    />
+                    <span className="text-xs text-muted">rem</span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-muted">姓名 / 小传</span>
+                  <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
+                    <span className="text-xs text-muted">×</span>
+                    <input
+                      className="w-14 bg-transparent text-center outline-none"
+                      value={String(nameRatio)}
+                      inputMode="decimal"
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d.]/g, "");
+                        if (!v) return;
+                        setNameRatio(clampNameRatio(Number(v)));
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-muted">书脊标题</span>
+                  <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
+                    <input
+                      className="w-12 bg-transparent text-center outline-none"
+                      value={String(spinePx)}
+                      inputMode="numeric"
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/\D/g, "");
+                        if (!v) return;
+                        setSpinePx(clampSpinePx(Number(v)));
+                      }}
+                    />
+                    <span className="text-xs text-muted">px</span>
+                  </div>
+                </div>
+                <p className="text-xs text-muted">
+                  生效：小传 {typography.detailRem}rem×{Math.round(typography.scale * 100)}%，
+                  姓名约 {(typography.detailRem * typography.nameRatio * typography.scale).toFixed(2)}rem，
+                  书脊 {Math.round(typography.spinePx * typography.scale)}px
+                </p>
+                <button
+                  type="button"
+                  className="text-xs text-muted hover:text-ink hover:underline"
+                  onClick={() => {
+                    setDetailRem(DEFAULT_TYPOGRAPHY.detailRem);
+                    setNameRatio(DEFAULT_TYPOGRAPHY.nameRatio);
+                    setSpinePx(DEFAULT_TYPOGRAPHY.spinePx);
+                  }}
+                >
+                  分项恢复默认
+                </button>
+              </div>
             ) : null}
           </div>
 
@@ -941,6 +1146,8 @@ export default function PublishPage() {
             <PublishSheet
               data={data}
               paper={paper}
+              font={font}
+              typography={typography}
               emptyHint={loading ? "正在生成版式…" : "无结果"}
             />
           )}

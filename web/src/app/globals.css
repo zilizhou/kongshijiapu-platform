@@ -119,6 +119,19 @@ h3,
   --pub-page-h: min(905px, calc(100vh - 150px));
   /* 屏显预览最大宽度，防止过宽 */
   --pub-preview-max-w: min(720px, 100%);
+  /* 字号：整体 scale × 分项基准 */
+  --pub-scale: 1;
+  --pub-detail-base: 1.14rem;
+  --pub-name-ratio: 1.55;
+  --pub-spine-base: 14px;
+  --pub-page-ratio: 0.9;
+  --pub-detail: calc(var(--pub-detail-base) * var(--pub-scale));
+  --pub-name: calc(var(--pub-detail) * var(--pub-name-ratio));
+  --pub-spine: calc(var(--pub-spine-base) * var(--pub-scale));
+  --pub-line: 1.15;
+  /* 版心与书脊共用字体栈，由界面选择注入 */
+  --pub-font-family: "Songti SC", "STSong", "SimSun", "宋体",
+    var(--font-serif), serif;
 }
 
 .publish-pages {
@@ -154,14 +167,15 @@ h3,
   flex: 0 0 2.75rem;
   padding: 1rem 0.25rem;
   border-right: 3px double var(--pub-rule);
-  font-size: 14px;
+  font-family: var(--pub-font-family);
+  font-size: var(--pub-spine, 14px);
   letter-spacing: 0.14em;
   background: linear-gradient(90deg, #f0e6d4, var(--pub-paper));
 }
 
 .publish-spine-level {
   margin-block-start: 1.25rem;
-  font-size: 0.9em;
+  font-size: calc(1em * var(--pub-page-ratio, 0.9));
   opacity: 0.85;
 }
 
@@ -193,14 +207,13 @@ h3,
   box-shadow: none !important;
 }
 
-/* 版心竖排：宋体/明体（对齐印刷族谱样张） */
+/* 版心竖排：字体由 --pub-font-family 控制 */
 .publish-body {
   writing-mode: vertical-rl;
   text-orientation: mixed;
   height: 100%;
   width: max-content;
-  font-family: "Songti SC", "STSong", "SimSun", "宋体", var(--font-serif),
-    serif;
+  font-family: var(--pub-font-family);
   font-weight: 400;
 }
 
@@ -218,8 +231,6 @@ h3,
  * 小传两列更易读；姓名常规字重居中。
  */
 .publish-person {
-  --pub-detail: 1.14rem;
-  --pub-line: 1.15;
   writing-mode: horizontal-tb;
   display: inline-block;
   vertical-align: top;
@@ -245,8 +256,7 @@ h3,
   margin-left: auto;
   margin-right: auto;
   transform: translateX(0.08em);
-  /* 约 1.55× 小字，缩小与小传的字号差 */
-  font-size: calc(1.55 * var(--pub-detail));
+  font-size: var(--pub-name);
   font-weight: 700;
   line-height: 1.05;
   letter-spacing: 0.08em;

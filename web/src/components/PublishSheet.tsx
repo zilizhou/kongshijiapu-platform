@@ -14,6 +14,16 @@ import {
   paperPrintCss,
   type PaperSize,
 } from "@/lib/paper";
+import {
+  DEFAULT_FONT,
+  DEFAULT_TYPOGRAPHY,
+  fontCssVars,
+  typographyCssVars,
+  typographyKey,
+  typographySummary,
+  type PublishFont,
+  type PublishTypography,
+} from "@/lib/publishType";
 
 type FlatEntry = PublishEntry & { genLabel: string };
 
@@ -127,10 +137,14 @@ export function PublishSheet({
   data,
   emptyHint,
   paper = DEFAULT_PAPER,
+  font = DEFAULT_FONT,
+  typography = DEFAULT_TYPOGRAPHY,
 }: {
   data: PublishPayload | null;
   emptyHint?: string;
   paper?: PaperSize;
+  font?: PublishFont;
+  typography?: PublishTypography;
 }) {
   const flat = useMemo(() => (data ? flattenEntries(data) : []), [data]);
   const measureRef = useRef<HTMLDivElement>(null);
@@ -138,15 +152,19 @@ export function PublishSheet({
   const pagesSigRef = useRef("");
   const [pages, setPages] = useState<FlatEntry[][]>([]);
   const paperKey = `${paper.widthMm}x${paper.heightMm}`;
+  const typeKey = typographyKey(typography);
+  const layoutKey = `${paperKey}_${font.id}_${typeKey}`;
 
   const rootStyle = useMemo(
-    () => paperCssVars(paper) as CSSProperties,
-    [paper.widthMm, paper.heightMm],
+    () =>
+      ({
+        ...paperCssVars(paper),
+        ...fontCssVars(font),
+        ...typographyCssVars(typography),
+      }) as CSSProperties,
+    [paper, font, typography],
   );
-  const printCss = useMemo(
-    () => paperPrintCss(paper),
-    [paper.widthMm, paper.heightMm],
-  );
+  const printCss = useMemo(() => paperPrintCss(paper), [paper]);
 
   useLayoutEffect(() => {
     if (!flat.length) {
@@ -220,8 +238,18 @@ export function PublishSheet({
       }
     };
 
-    // 纸张 CSS 变量生效后再量
+    // 字体/纸张/字号 CSS 变量生效后再量；字体会异步加载，再补测一次
     const raf = window.requestAnimationFrame(measure);
+    let fontTimer: number | undefined;
+    if (document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (!cancelled) window.requestAnimationFrame(measure);
+      });
+    } else {
+      fontTimer = window.setTimeout(() => {
+        if (!cancelled) measure();
+      }, 120);
+    }
     const onResize = () => {
       window.requestAnimationFrame(measure);
     };
@@ -229,9 +257,10 @@ export function PublishSheet({
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(raf);
+      if (fontTimer) window.clearTimeout(fontTimer);
       window.removeEventListener("resize", onResize);
     };
-  }, [flat, paperKey, paper.widthMm, paper.heightMm]);
+  }, [flat, layoutKey, paper.widthMm, paper.heightMm]);
 
   if (!data) {
     return (
@@ -253,7 +282,8 @@ export function PublishSheet({
       />
       <div className="publish-meta no-print mb-3 text-sm text-muted">
         {data.subtitle} · 共 {data.total} 人 · {displayPages.length} 页 ·{" "}
-        {paper.label}（{paper.widthMm}×{paper.heightMm}mm）
+        {paper.label}（{paper.widthMm}×{paper.heightMm}mm） · {font.label} ·{" "}
+        {typographySummary(typography)}
       </div>
 
       <div className="publish-measure no-print" aria-hidden>
@@ -272,10 +302,10 @@ export function PublishSheet({
       <div className="publish-pages">
         {displayPages.map((pageEntries, pageIndex) => (
           <section
-            key={`page-${pageIndex}-${paperKey}`}
+            key={`page-${pageIndex}-${layoutKey}`}
             className="publish-page"
           >
-            <aside className="publish-spine font-display">
+            <aside className="publish-spine">
               <div className="publish-spine-inner whitespace-pre-line">
                 {data.title}
               </div>
@@ -297,3 +327,5 @@ export function PublishSheet({
     </div>
   );
 }
+
+
