@@ -109,16 +109,15 @@ h3,
 }
 
 /* —— 家谱出版：竖版纸 + 传统竖排 ——
- * 纸张尺寸由 --pub-w-mm / --pub-h-mm 控制（默认 A4 210×297）。
- * 每人：大字姓名在上，小传在下（至多两列小字，先右后左）。
- * 多人：同一列内上下接排；列满后向左开新列；页宽用尽换页。
+ * 纸张真实尺寸 = --pub-page-w/h（由所选 A4/B5… 的 mm 换算），
+ * 屏显用 --pub-preview-scale 整体缩小；打印时强制 1:1 纸张分页。
  */
 .publish-root {
   --pub-w-mm: 210;
   --pub-h-mm: 297;
-  --pub-page-h: min(905px, calc(100vh - 150px));
-  /* 屏显预览最大宽度，防止过宽 */
-  --pub-preview-max-w: min(720px, 100%);
+  --pub-page-w: 210mm;
+  --pub-page-h: 297mm;
+  --pub-preview-scale: 1;
   /* 字号：整体 scale × 分项基准 */
   --pub-scale: 1;
   --pub-detail-base: 1.14rem;
@@ -129,9 +128,7 @@ h3,
   --pub-name: calc(var(--pub-detail) * var(--pub-name-ratio));
   --pub-spine: calc(var(--pub-spine-base) * var(--pub-scale));
   --pub-line: 1.15;
-  /* 书脊栏横向宽度 */
   --pub-spine-width: 2.75rem;
-  /* 版心与书脊共用字体栈，由界面选择注入 */
   --pub-font-family: "Songti SC", "STSong", "SimSun", "宋体",
     var(--font-serif), serif;
 }
@@ -143,17 +140,21 @@ h3,
   gap: 1.5rem;
 }
 
+/* 屏显：外壳只占缩放后的尺寸，内部纸面按真实 mm/px 再 scale */
+.publish-page-outer {
+  width: calc(var(--pub-page-w) * var(--pub-preview-scale));
+  height: calc(var(--pub-page-h) * var(--pub-preview-scale));
+  position: relative;
+  flex-shrink: 0;
+}
+
 .publish-page {
   --pub-paper: #f7f0e2;
   --pub-rule: #c45c4a;
   --pub-ink: #2a1f18;
-  /* 竖版：高固定，宽按纸张比例 */
+  box-sizing: border-box;
+  width: var(--pub-page-w);
   height: var(--pub-page-h);
-  width: min(
-    var(--pub-preview-max-w),
-    100%,
-    calc(var(--pub-page-h) * var(--pub-w-mm) / var(--pub-h-mm))
-  );
   display: flex;
   flex-direction: row;
   align-items: stretch;
@@ -162,6 +163,19 @@ h3,
   border: 1px solid #e2d4bf;
   box-shadow: 0 8px 28px rgba(42, 31, 24, 0.08);
   overflow: hidden;
+  transform-origin: top left;
+  transform: scale(var(--pub-preview-scale));
+}
+
+.publish-page-label {
+  position: absolute;
+  left: 0;
+  bottom: -1.35rem;
+  width: 100%;
+  text-align: center;
+  font-size: 11px;
+  color: #6b7a90;
+  pointer-events: none;
 }
 
 .publish-spine {
@@ -193,7 +207,7 @@ h3,
   overflow: hidden;
 }
 
-/* 隐藏测量层：必须给明确纸宽（不能写 100%，绝对定位父级百分比会塌成内容宽≈1 列） */
+/* 隐藏测量层：按 1:1 真实纸张尺寸测量（不缩放） */
 .publish-measure {
   position: absolute;
   left: -10000px;
@@ -203,10 +217,9 @@ h3,
 }
 
 .publish-measure .publish-page {
-  width: min(
-    720px,
-    calc(var(--pub-page-h) * var(--pub-w-mm) / var(--pub-h-mm))
-  );
+  transform: none !important;
+  width: var(--pub-page-w) !important;
+  height: var(--pub-page-h) !important;
 }
 
 .publish-page-probe {
@@ -312,7 +325,6 @@ h3,
 }
 
 @media print {
-  /* 具体 size 由 PublishSheet 注入的纸张样式覆盖 */
   @page {
     size: A4 portrait;
     margin: 0;
@@ -324,16 +336,16 @@ h3,
     padding: 0 !important;
     background: white !important;
     height: auto !important;
-    overflow: hidden !important;
+    width: auto !important;
+    overflow: visible !important;
   }
 
-  /* 默认全部隐藏，只露出世系表纸面（红框内容） */
   body * {
     visibility: hidden !important;
   }
 
-  .publish-pages,
-  .publish-pages * {
+  .publish-root,
+  .publish-root * {
     visibility: visible !important;
   }
 
@@ -346,8 +358,12 @@ h3,
   .app-shell-aside,
   .app-shell-header,
   .publish-query-panel,
-  .publish-page-header {
+  .publish-page-header,
+  .publish-meta,
+  .publish-measure,
+  .publish-page-label {
     display: none !important;
+    visibility: hidden !important;
   }
 
   main {
@@ -363,34 +379,27 @@ h3,
     margin: 0 !important;
     background: transparent !important;
     border-radius: 0 !important;
+    overflow: visible !important;
   }
 
   .publish-pages {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: calc(var(--pub-w-mm) * 1mm);
+    position: static !important;
+    display: block !important;
     gap: 0 !important;
     align-items: stretch !important;
   }
 
-  .publish-page {
-    visibility: visible !important;
-    box-sizing: border-box !important;
+  .publish-page-outer {
     box-shadow: none !important;
-    border: 1px solid #c45c4a;
-    width: calc(var(--pub-w-mm) * 1mm) !important;
-    height: calc(var(--pub-h-mm) * 1mm) !important;
-    max-height: calc(var(--pub-h-mm) * 1mm) !important;
-    margin: 0 !important;
-    break-inside: avoid;
-    page-break-after: always;
-    page-break-inside: avoid;
     overflow: hidden !important;
   }
 
-  .publish-page:last-child {
-    page-break-after: auto !important;
+  .publish-page {
+    visibility: visible !important;
+    box-shadow: none !important;
+    border: 1px solid #c45c4a;
+    transform: none !important;
+    overflow: hidden !important;
   }
 
   .publish-frame {

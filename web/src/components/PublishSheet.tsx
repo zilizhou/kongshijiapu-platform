@@ -12,6 +12,7 @@ import {
   DEFAULT_PAPER,
   paperCssVars,
   paperPrintCss,
+  paperSizePx,
   type PaperSize,
 } from "@/lib/paper";
 import {
@@ -63,7 +64,6 @@ function PersonStrip({ entry }: { entry: FlatEntry | PublishEntry }) {
 /**
  * 竖排装箱：同一列内自上而下接排；列满后向左开新列；页宽用尽换页。
  * 每人不可拆列（整块迁到下一列/页）。
- * 列数按向下取整留余量，避免最后一列溢出贴到书脊。
  */
 function packPages(
   items: FlatEntry[],
@@ -74,7 +74,6 @@ function packPages(
   gapPx: number,
 ): FlatEntry[][] {
   if (!items.length) return [[]];
-  // 左右各留余量，防止末列被裁切或压进书脊
   const limitW = Math.max(40, pageWidth - 20);
   const limitH = Math.max(40, pageHeight - 4);
   const colW = Math.max(18, personWidth + 2);
@@ -109,7 +108,6 @@ function packPages(
         continue;
       }
 
-      // 当前列满 → 若已达最大列数则换页
       if (cols >= maxCols) {
         break;
       }
@@ -133,6 +131,15 @@ function pagesSignature(pages: FlatEntry[][]): string {
   return pages.map((p) => p.map((e) => e.id).join(",")).join("|");
 }
 
+function computePreviewScale(paper: PaperSize): number {
+  if (typeof window === "undefined") return 0.55;
+  const { widthPx, heightPx } = paperSizePx(paper);
+  // 右侧结果区大致可用空间（扣侧栏、页头）
+  const maxW = Math.min(720, Math.max(240, window.innerWidth - 380));
+  const maxH = Math.min(920, Math.max(320, window.innerHeight - 180));
+  return Math.min(1, maxW / widthPx, maxH / heightPx);
+}
+
 export function PublishSheet({
   data,
   emptyHint,
@@ -151,6 +158,7 @@ export function PublishSheet({
   const widthProbeRef = useRef<HTMLDivElement>(null);
   const pagesSigRef = useRef("");
   const [pages, setPages] = useState<FlatEntry[][]>([]);
+  const [previewScale, setPreviewScale] = useState(0.55);
   const paperKey = `${paper.widthMm}x${paper.heightMm}`;
   const typeKey = typographyKey(typography);
   const layoutKey = `${paperKey}_${font.id}_${typeKey}`;
@@ -158,13 +166,20 @@ export function PublishSheet({
   const rootStyle = useMemo(
     () =>
       ({
-        ...paperCssVars(paper),
+        ...paperCssVars(paper, previewScale),
         ...fontCssVars(font),
         ...typographyCssVars(typography),
       }) as CSSProperties,
-    [paper, font, typography],
+    [paper, font, typography, previewScale],
   );
   const printCss = useMemo(() => paperPrintCss(paper), [paper]);
+
+  useLayoutEffect(() => {
+    const updateScale = () => setPreviewScale(computePreviewScale(paper));
+    updateScale();
+    window.addEventListener("resize", updateScale);
+    return () => window.removeEventListener("resize", updateScale);
+  }, [paper.widthMm, paper.heightMm]);
 
   useLayoutEffect(() => {
     if (!flat.length) {
@@ -189,9 +204,8 @@ export function PublishSheet({
         return;
       }
 
-      const pageHeight = box.clientHeight || probe.clientHeight || 640;
-      // 版心宽：测量层若仍异常偏窄，按所选纸张比例回退
-      const framePad = 28;
+      // 按真实纸张版心（1:1）装箱，与打印一致
+      const pageHeight = box.clientHeight || paperSizePx(paper).heightPx * 0.9;
       const pageEl = probe.closest(".publish-page");
       const spineEl = pageEl?.querySelector(
         ".publish-spine",
@@ -199,12 +213,11 @@ export function PublishSheet({
       const spineW = spineEl
         ? spineEl.getBoundingClientRect().width || 44
         : 44;
-      const ratio = paper.widthMm / paper.heightMm;
-      const fallbackContentW =
-        Math.min(720, pageHeight * ratio) - spineW - framePad;
+      const framePad = 24;
+      const fullW = paperSizePx(paper).widthPx;
       let pageWidth = probe.clientWidth || 0;
-      if (pageWidth < 120) {
-        pageWidth = Math.max(200, fallbackContentW);
+      if (pageWidth < 80) {
+        pageWidth = Math.max(120, fullW - spineW - framePad);
       }
 
       const nodes = [
@@ -221,13 +234,11 @@ export function PublishSheet({
         })
         .filter((w) => w > 8 && w < pageWidth * 0.5);
       const sorted = [...widths].sort((a, b) => a - b);
-      // 用偏大分位，避免低估栏宽导致多塞一列溢出
       const personWidth =
         sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.85))] ||
         sorted[0] ||
         40;
 
-      // 与 .publish-person 的 margin-block-end / padding 对齐，避免装箱低估间距
       const gapPx = 18;
       const next = packPages(
         flat,
@@ -244,7 +255,6 @@ export function PublishSheet({
       }
     };
 
-    // 字体/纸张/字号 CSS 变量生效后再量；字体会异步加载，再补测一次
     const raf = window.requestAnimationFrame(measure);
     let fontTimer: number | undefined;
     if (document.fonts?.ready) {
@@ -266,7 +276,7 @@ export function PublishSheet({
       if (fontTimer) window.clearTimeout(fontTimer);
       window.removeEventListener("resize", onResize);
     };
-  }, [flat, layoutKey, paper.widthMm, paper.heightMm]);
+  }, [flat, layoutKey, paper]);
 
   if (!data) {
     return (
@@ -278,6 +288,7 @@ export function PublishSheet({
   }
 
   const displayPages = pages.length ? pages : [flat];
+  const paperTag = `${paper.label} ${paper.widthMm}×${paper.heightMm}mm`;
 
   return (
     <div className="publish-root" style={rootStyle}>
@@ -288,8 +299,15 @@ export function PublishSheet({
       />
       <div className="publish-meta no-print mb-3 text-sm text-muted">
         {data.subtitle} · 共 {data.total} 人 · {displayPages.length} 页 ·{" "}
-        {paper.label}（{paper.widthMm}×{paper.heightMm}mm） · {font.label} ·{" "}
-        {typographySummary(typography)}
+        {paperTag} · {font.label} · {typographySummary(typography)}
+        <span className="mt-1 block text-xs">
+          预览按真实纸张比例缩小显示；打印时请选「边距：无」，纸张选{" "}
+          {paper.label}
+          {paper.id === "custom"
+            ? `（自定义 ${paper.widthMm}×${paper.heightMm}mm）`
+            : ""}
+          。
+        </span>
       </div>
 
       <div className="publish-measure no-print" aria-hidden>
@@ -307,31 +325,37 @@ export function PublishSheet({
 
       <div className="publish-pages">
         {displayPages.map((pageEntries, pageIndex) => (
-          <section
-            key={`page-${pageIndex}-${layoutKey}`}
-            className="publish-page"
+          <div
+            key={`outer-${pageIndex}-${layoutKey}`}
+            className="publish-page-outer"
           >
-            <aside className="publish-spine">
-              <div className="publish-spine-inner whitespace-pre-line">
-                {data.title}
-              </div>
-              <div className="publish-spine-level">
-                第{pageIndex + 1}/{displayPages.length}页
-              </div>
-            </aside>
+            <section className="publish-page">
+              <aside className="publish-spine">
+                <div className="publish-spine-inner whitespace-pre-line">
+                  {data.title}
+                </div>
+                <div className="publish-spine-level">
+                  第{pageIndex + 1}/{displayPages.length}页
+                </div>
+              </aside>
 
-            <div className="publish-frame">
-              <div className="publish-body publish-body-paged">
-                {pageEntries.map((entry) => (
-                  <PersonStrip key={`${pageIndex}-${entry.id}`} entry={entry} />
-                ))}
+              <div className="publish-frame">
+                <div className="publish-body publish-body-paged">
+                  {pageEntries.map((entry) => (
+                    <PersonStrip
+                      key={`${pageIndex}-${entry.id}`}
+                      entry={entry}
+                    />
+                  ))}
+                </div>
               </div>
+            </section>
+            <div className="publish-page-label no-print">
+              第 {pageIndex + 1} / {displayPages.length} 页 · {paperTag}
             </div>
-          </section>
+          </div>
         ))}
       </div>
     </div>
   );
 }
-
-
