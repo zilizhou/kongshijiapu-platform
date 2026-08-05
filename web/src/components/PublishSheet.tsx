@@ -5,8 +5,15 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
 } from "react";
 import type { PublishEntry, PublishPayload } from "@/lib/publish";
+import {
+  DEFAULT_PAPER,
+  paperCssVars,
+  paperPrintCss,
+  type PaperSize,
+} from "@/lib/paper";
 
 type FlatEntry = PublishEntry & { genLabel: string };
 
@@ -119,15 +126,27 @@ function pagesSignature(pages: FlatEntry[][]): string {
 export function PublishSheet({
   data,
   emptyHint,
+  paper = DEFAULT_PAPER,
 }: {
   data: PublishPayload | null;
   emptyHint?: string;
+  paper?: PaperSize;
 }) {
   const flat = useMemo(() => (data ? flattenEntries(data) : []), [data]);
   const measureRef = useRef<HTMLDivElement>(null);
   const widthProbeRef = useRef<HTMLDivElement>(null);
   const pagesSigRef = useRef("");
   const [pages, setPages] = useState<FlatEntry[][]>([]);
+  const paperKey = `${paper.widthMm}x${paper.heightMm}`;
+
+  const rootStyle = useMemo(
+    () => paperCssVars(paper) as CSSProperties,
+    [paper.widthMm, paper.heightMm],
+  );
+  const printCss = useMemo(
+    () => paperPrintCss(paper),
+    [paper.widthMm, paper.heightMm],
+  );
 
   useLayoutEffect(() => {
     if (!flat.length) {
@@ -153,13 +172,15 @@ export function PublishSheet({
       }
 
       const pageHeight = box.clientHeight || probe.clientHeight || 640;
-      // 版心宽：测量层若仍异常偏窄，按 A4 比例回退，避免「一列就换页」
+      // 版心宽：测量层若仍异常偏窄，按所选纸张比例回退
       const framePad = 28;
       const spineW = 44;
-      const a4ContentW = Math.min(640, pageHeight * (210 / 297)) - spineW - framePad;
+      const ratio = paper.widthMm / paper.heightMm;
+      const fallbackContentW =
+        Math.min(720, pageHeight * ratio) - spineW - framePad;
       let pageWidth = probe.clientWidth || 0;
       if (pageWidth < 120) {
-        pageWidth = Math.max(200, a4ContentW);
+        pageWidth = Math.max(200, fallbackContentW);
       }
 
       const nodes = [
@@ -199,16 +220,18 @@ export function PublishSheet({
       }
     };
 
-    measure();
+    // 纸张 CSS 变量生效后再量
+    const raf = window.requestAnimationFrame(measure);
     const onResize = () => {
       window.requestAnimationFrame(measure);
     };
     window.addEventListener("resize", onResize);
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
     };
-  }, [flat]);
+  }, [flat, paperKey, paper.widthMm, paper.heightMm]);
 
   if (!data) {
     return (
@@ -222,10 +245,15 @@ export function PublishSheet({
   const displayPages = pages.length ? pages : [flat];
 
   return (
-    <div className="publish-root">
+    <div className="publish-root" style={rootStyle}>
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `@media print {\n${printCss}\n}`,
+        }}
+      />
       <div className="publish-meta no-print mb-3 text-sm text-muted">
-        {data.subtitle} · 共 {data.total} 人 · {displayPages.length}{" "}
-        页（列满向左，页满换页）
+        {data.subtitle} · 共 {data.total} 人 · {displayPages.length} 页 ·{" "}
+        {paper.label}（{paper.widthMm}×{paper.heightMm}mm）
       </div>
 
       <div className="publish-measure no-print" aria-hidden>
@@ -243,7 +271,10 @@ export function PublishSheet({
 
       <div className="publish-pages">
         {displayPages.map((pageEntries, pageIndex) => (
-          <section key={`page-${pageIndex}`} className="publish-page">
+          <section
+            key={`page-${pageIndex}-${paperKey}`}
+            className="publish-page"
+          >
             <aside className="publish-spine font-display">
               <div className="publish-spine-inner whitespace-pre-line">
                 {data.title}

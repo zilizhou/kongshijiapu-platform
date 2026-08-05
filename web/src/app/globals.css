@@ -109,11 +109,18 @@ h3,
 }
 
 /* —— 家谱出版：竖版纸 + 传统竖排 ——
- * 纸张：A4 竖版（高>宽）。
+ * 纸张尺寸由 --pub-w-mm / --pub-h-mm 控制（默认 A4 210×297）。
  * 每人：大字姓名在上，小传在下（至多两列小字，先右后左）。
  * 多人：同一列内上下接排；列满后向左开新列；页宽用尽换页。
- *       （不是一人独占整列高度。）
  */
+.publish-root {
+  --pub-w-mm: 210;
+  --pub-h-mm: 297;
+  --pub-page-h: min(905px, calc(100vh - 150px));
+  /* 屏显预览最大宽度，防止过宽 */
+  --pub-preview-max-w: min(720px, 100%);
+}
+
 .publish-pages {
   display: flex;
   flex-direction: column;
@@ -125,10 +132,13 @@ h3,
   --pub-paper: #f7f0e2;
   --pub-rule: #c45c4a;
   --pub-ink: #2a1f18;
-  /* A4 竖版 210×297：高度受限时宽度随比例收缩 */
-  --pub-page-h: min(905px, calc(100vh - 150px));
+  /* 竖版：高固定，宽按纸张比例 */
   height: var(--pub-page-h);
-  width: min(640px, 100%, calc(var(--pub-page-h) * 210 / 297));
+  width: min(
+    var(--pub-preview-max-w),
+    100%,
+    calc(var(--pub-page-h) * var(--pub-w-mm) / var(--pub-h-mm))
+  );
   display: flex;
   flex-direction: row;
   align-items: stretch;
@@ -173,7 +183,10 @@ h3,
 }
 
 .publish-measure .publish-page {
-  width: min(640px, calc(var(--pub-page-h) * 210 / 297));
+  width: min(
+    720px,
+    calc(var(--pub-page-h) * var(--pub-w-mm) / var(--pub-h-mm))
+  );
 }
 
 .publish-page-probe {
@@ -283,6 +296,7 @@ h3,
 }
 
 @media print {
+  /* 具体 size 由 PublishSheet 注入的纸张样式覆盖 */
   @page {
     size: A4 portrait;
     margin: 0;
@@ -339,7 +353,7 @@ h3,
     position: absolute;
     left: 0;
     top: 0;
-    width: 210mm;
+    width: calc(var(--pub-w-mm) * 1mm);
     gap: 0 !important;
     align-items: stretch !important;
   }
@@ -349,9 +363,9 @@ h3,
     box-sizing: border-box !important;
     box-shadow: none !important;
     border: 1px solid #c45c4a;
-    width: 210mm !important;
-    height: 297mm !important;
-    max-height: 297mm !important;
+    width: calc(var(--pub-w-mm) * 1mm) !important;
+    height: calc(var(--pub-h-mm) * 1mm) !important;
+    max-height: calc(var(--pub-h-mm) * 1mm) !important;
     margin: 0 !important;
     break-inside: avoid;
     page-break-after: always;

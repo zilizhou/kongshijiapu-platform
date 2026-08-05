@@ -14,6 +14,12 @@ import {
   TableScroll,
   tableHeadClass,
 } from "@/components/ui";
+import {
+  DEFAULT_PAPER,
+  PAPER_PRESETS,
+  resolvePaperSize,
+  type PaperPresetId,
+} from "@/lib/paper";
 import type { PublishPayload } from "@/lib/publish";
 import type { PeopleRow } from "@/lib/types";
 
@@ -169,10 +175,19 @@ export default function PublishPage() {
     "100",
   );
   const [customLimit, setCustomLimit] = useState("400");
+  /** 出版物纸张：预设或自定义毫米尺寸（仅影响排版，不重新查库） */
+  const [paperPreset, setPaperPreset] = useState<PaperPresetId>("A4");
+  const [customPaperW, setCustomPaperW] = useState(String(DEFAULT_PAPER.widthMm));
+  const [customPaperH, setCustomPaperH] = useState(String(DEFAULT_PAPER.heightMm));
   const [data, setData] = useState<PublishPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [queried, setQueried] = useState(false);
+
+  const paper = useMemo(
+    () => resolvePaperSize(paperPreset, customPaperW, customPaperH),
+    [paperPreset, customPaperW, customPaperH],
+  );
 
   const selected = nameHits.find((h) => h.id === personId) || null;
 
@@ -286,6 +301,9 @@ export default function PublishPage() {
     setDown(3);
     setLimitPreset("100");
     setCustomLimit("400");
+    setPaperPreset("A4");
+    setCustomPaperW(String(DEFAULT_PAPER.widthMm));
+    setCustomPaperH(String(DEFAULT_PAPER.heightMm));
     setData(null);
     setError("");
     setQueried(false);
@@ -296,7 +314,7 @@ export default function PublishPage() {
       <div className="publish-page-header no-print">
         <PageHeader
           title="家谱出版"
-          desc="按人物或派户支生成传统竖排世系表，可打印或另存为 PDF。"
+          desc="按人物或派户支生成传统竖排世系表，可选 A4 / B5 等纸张或自定义尺寸，再打印或另存 PDF。"
           actions={
             data ? (
               <Button
@@ -526,6 +544,76 @@ export default function PublishPage() {
               </div>
             </>
           )}
+
+          <div>
+            <Label>纸张</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              {PAPER_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`rounded-lg border px-3 py-1.5 text-sm ${
+                    paperPreset === p.id
+                      ? "border-[#5b8fd9] bg-[#5b8fd9] text-white"
+                      : "border-line bg-white text-muted hover:bg-soft"
+                  }`}
+                  onClick={() => setPaperPreset(p.id)}
+                  title={`${p.widthMm}×${p.heightMm}mm`}
+                >
+                  {p.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`rounded-lg border px-3 py-1.5 text-sm ${
+                  paperPreset === "custom"
+                    ? "border-[#5b8fd9] bg-[#5b8fd9] text-white"
+                    : "border-line bg-white text-muted hover:bg-soft"
+                }`}
+                onClick={() => setPaperPreset("custom")}
+              >
+                自定义
+              </button>
+            </div>
+            {paperPreset === "custom" ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
+                  <span className="text-xs text-muted">宽</span>
+                  <input
+                    className="w-14 bg-transparent text-center outline-none"
+                    value={customPaperW}
+                    inputMode="numeric"
+                    onChange={(e) =>
+                      setCustomPaperW(e.target.value.replace(/\D/g, ""))
+                    }
+                  />
+                  <span className="text-xs text-muted">mm</span>
+                </div>
+                <span className="text-muted">×</span>
+                <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
+                  <span className="text-xs text-muted">高</span>
+                  <input
+                    className="w-14 bg-transparent text-center outline-none"
+                    value={customPaperH}
+                    inputMode="numeric"
+                    onChange={(e) =>
+                      setCustomPaperH(e.target.value.replace(/\D/g, ""))
+                    }
+                  />
+                  <span className="text-xs text-muted">mm</span>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-1.5 text-xs text-muted">
+                {paper.widthMm}×{paper.heightMm}mm · 竖版 · 切换后预览与分页即时调整
+              </p>
+            )}
+            {paperPreset === "custom" ? (
+              <p className="mt-1.5 text-xs text-muted">
+                范围 80–420mm · 当前 {paper.widthMm}×{paper.heightMm}mm（竖版）
+              </p>
+            ) : null}
+          </div>
 
           <div className="flex gap-2 pt-1">
             <Button
@@ -852,6 +940,7 @@ export default function PublishPage() {
           ) : (
             <PublishSheet
               data={data}
+              paper={paper}
               emptyHint={loading ? "正在生成版式…" : "无结果"}
             />
           )}
