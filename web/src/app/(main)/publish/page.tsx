@@ -22,17 +22,23 @@ import {
 } from "@/lib/paper";
 import type { PublishPayload } from "@/lib/publish";
 import {
-  clampDetailRem,
-  clampNameRatio,
   clampScale,
-  clampSpinePx,
   DEFAULT_FONT,
   DEFAULT_TYPOGRAPHY,
-  PUBLISH_FONTS,
-  SCALE_PRESETS,
+  DETAIL_SIZE_PRESETS,
+  effectiveTypePx,
+  matchDetailPresetId,
+  matchNamePresetId,
   matchScalePreset,
+  matchSpinePresetId,
+  matchSpineWidthPresetId,
+  NAME_SIZE_PRESETS,
   normalizeTypography,
+  PUBLISH_FONTS,
   resolvePublishFont,
+  SCALE_PRESETS,
+  SPINE_SIZE_PRESETS,
+  SPINE_WIDTH_PRESETS,
   type PublishFontId,
   type PublishTypography,
 } from "@/lib/publishType";
@@ -203,6 +209,9 @@ export default function PublishPage() {
   const [detailRem, setDetailRem] = useState(DEFAULT_TYPOGRAPHY.detailRem);
   const [nameRatio, setNameRatio] = useState(DEFAULT_TYPOGRAPHY.nameRatio);
   const [spinePx, setSpinePx] = useState(DEFAULT_TYPOGRAPHY.spinePx);
+  const [spineWidthRem, setSpineWidthRem] = useState(
+    DEFAULT_TYPOGRAPHY.spineWidthRem,
+  );
   const [showTypeDetail, setShowTypeDetail] = useState(false);
   const [data, setData] = useState<PublishPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -224,11 +233,18 @@ export default function PublishPage() {
         nameRatio,
         spinePx,
         pageRatio: DEFAULT_TYPOGRAPHY.pageRatio,
+        spineWidthRem,
       }),
-    [typeScale, detailRem, nameRatio, spinePx],
+    [typeScale, detailRem, nameRatio, spinePx, spineWidthRem],
   );
 
   const scalePreset = scaleIsCustom ? "custom" : matchScalePreset(typeScale);
+  const detailPresetId = matchDetailPresetId(detailRem);
+  const namePresetId = matchNamePresetId(nameRatio);
+  const spinePresetId = matchSpinePresetId(spinePx);
+  const spineWidthPresetId = matchSpineWidthPresetId(spineWidthRem);
+  const typePx = effectiveTypePx(typography);
+  const spineWidthPxApprox = Math.round(spineWidthRem * 16);
 
   const selected = nameHits.find((h) => h.id === personId) || null;
 
@@ -352,6 +368,7 @@ export default function PublishPage() {
     setDetailRem(DEFAULT_TYPOGRAPHY.detailRem);
     setNameRatio(DEFAULT_TYPOGRAPHY.nameRatio);
     setSpinePx(DEFAULT_TYPOGRAPHY.spinePx);
+    setSpineWidthRem(DEFAULT_TYPOGRAPHY.spineWidthRem);
     setShowTypeDetail(false);
     setData(null);
     setError("");
@@ -741,70 +758,125 @@ export default function PublishPage() {
               ) : null}
             </div>
             <p className="mt-1.5 text-xs text-muted">
-              整体 {Math.round(typeScale * 100)}% · 姓名、小传、书脊一并缩放
+              整体缩放：姓名、小传、书脊一起变大或变小
             </p>
             <button
               type="button"
               className="mt-1.5 text-xs text-[#5b8fd9] hover:underline"
               onClick={() => setShowTypeDetail((v) => !v)}
             >
-              {showTypeDetail ? "收起分项调节" : "分项调节（小传 / 姓名 / 书脊）"}
+              {showTypeDetail
+                ? "收起单项调节"
+                : "再分别调：姓名 / 小传 / 书脊字号与宽度"}
             </button>
             {showTypeDetail ? (
-              <div className="mt-2 space-y-2 rounded-lg border border-line bg-soft/40 p-3 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-muted">小传基准</span>
-                  <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
-                    <input
-                      className="w-14 bg-transparent text-center outline-none"
-                      value={String(detailRem)}
-                      inputMode="decimal"
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/[^\d.]/g, "");
-                        if (!v) return;
-                        setDetailRem(clampDetailRem(Number(v)));
-                      }}
-                    />
-                    <span className="text-xs text-muted">rem</span>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-muted">姓名 / 小传</span>
-                  <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
-                    <span className="text-xs text-muted">×</span>
-                    <input
-                      className="w-14 bg-transparent text-center outline-none"
-                      value={String(nameRatio)}
-                      inputMode="decimal"
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/[^\d.]/g, "");
-                        if (!v) return;
-                        setNameRatio(clampNameRatio(Number(v)));
-                      }}
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-muted">书脊标题</span>
-                  <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
-                    <input
-                      className="w-12 bg-transparent text-center outline-none"
-                      value={String(spinePx)}
-                      inputMode="numeric"
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/\D/g, "");
-                        if (!v) return;
-                        setSpinePx(clampSpinePx(Number(v)));
-                      }}
-                    />
-                    <span className="text-xs text-muted">px</span>
-                  </div>
-                </div>
-                <p className="text-xs text-muted">
-                  生效：小传 {typography.detailRem}rem×{Math.round(typography.scale * 100)}%，
-                  姓名约 {(typography.detailRem * typography.nameRatio * typography.scale).toFixed(2)}rem，
-                  书脊 {Math.round(typography.spinePx * typography.scale)}px
+              <div className="mt-2 space-y-3 rounded-lg border border-line bg-soft/40 p-3 text-sm">
+                <p className="text-xs leading-relaxed text-muted">
+                  下面改的是「相对大小」；再经上方整体缩放后，页面上大约是：
+                  <span className="font-medium text-ink">
+                    {" "}
+                    姓名 {typePx.name}px · 小传 {typePx.detail}px · 书脊{" "}
+                    {typePx.spine}px
+                  </span>
                 </p>
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-ink">姓名</span>
+                    <span className="text-xs text-muted">约 {typePx.name}px</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {NAME_SIZE_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`rounded-md border px-2.5 py-1 text-xs ${
+                          namePresetId === p.id
+                            ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
+                            : "border-line bg-white text-muted hover:bg-soft"
+                        }`}
+                        onClick={() => setNameRatio(p.ratio)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-ink">小传</span>
+                    <span className="text-xs text-muted">约 {typePx.detail}px</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DETAIL_SIZE_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`rounded-md border px-2.5 py-1 text-xs ${
+                          detailPresetId === p.id
+                            ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
+                            : "border-line bg-white text-muted hover:bg-soft"
+                        }`}
+                        onClick={() => setDetailRem(p.rem)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-ink">书脊字号</span>
+                    <span className="text-xs text-muted">约 {typePx.spine}px</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SPINE_SIZE_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`rounded-md border px-2.5 py-1 text-xs ${
+                          spinePresetId === p.id
+                            ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
+                            : "border-line bg-white text-muted hover:bg-soft"
+                        }`}
+                        onClick={() => setSpinePx(p.px)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-ink">书脊宽度</span>
+                    <span className="text-xs text-muted">
+                      约 {spineWidthPxApprox}px
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SPINE_WIDTH_PRESETS.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`rounded-md border px-2.5 py-1 text-xs ${
+                          spineWidthPresetId === p.id
+                            ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
+                            : "border-line bg-white text-muted hover:bg-soft"
+                        }`}
+                        onClick={() => setSpineWidthRem(p.rem)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-xs text-muted">
+                    左侧题名栏（如「中興祖至分戶」）横向占宽
+                  </p>
+                </div>
+
                 <button
                   type="button"
                   className="text-xs text-muted hover:text-ink hover:underline"
@@ -812,9 +884,10 @@ export default function PublishPage() {
                     setDetailRem(DEFAULT_TYPOGRAPHY.detailRem);
                     setNameRatio(DEFAULT_TYPOGRAPHY.nameRatio);
                     setSpinePx(DEFAULT_TYPOGRAPHY.spinePx);
+                    setSpineWidthRem(DEFAULT_TYPOGRAPHY.spineWidthRem);
                   }}
                 >
-                  分项恢复默认
+                  单项恢复标准
                 </button>
               </div>
             ) : null}

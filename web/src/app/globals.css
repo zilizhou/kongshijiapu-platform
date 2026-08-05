@@ -129,6 +129,8 @@ h3,
   --pub-name: calc(var(--pub-detail) * var(--pub-name-ratio));
   --pub-spine: calc(var(--pub-spine-base) * var(--pub-scale));
   --pub-line: 1.15;
+  /* 书脊栏横向宽度 */
+  --pub-spine-width: 2.75rem;
   /* 版心与书脊共用字体栈，由界面选择注入 */
   --pub-font-family: "Songti SC", "STSong", "SimSun", "宋体",
     var(--font-serif), serif;
@@ -164,13 +166,17 @@ h3,
 
 .publish-spine {
   writing-mode: vertical-rl;
-  flex: 0 0 2.75rem;
+  flex: 0 0 var(--pub-spine-width, 2.75rem);
+  width: var(--pub-spine-width, 2.75rem);
+  max-width: var(--pub-spine-width, 2.75rem);
   padding: 1rem 0.25rem;
   border-right: 3px double var(--pub-rule);
   font-family: var(--pub-font-family);
   font-size: var(--pub-spine, 14px);
   letter-spacing: 0.14em;
   background: linear-gradient(90deg, #f0e6d4, var(--pub-paper));
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .publish-spine-level {

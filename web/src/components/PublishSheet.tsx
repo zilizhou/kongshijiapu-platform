@@ -192,7 +192,13 @@ export function PublishSheet({
       const pageHeight = box.clientHeight || probe.clientHeight || 640;
       // 版心宽：测量层若仍异常偏窄，按所选纸张比例回退
       const framePad = 28;
-      const spineW = 44;
+      const pageEl = probe.closest(".publish-page");
+      const spineEl = pageEl?.querySelector(
+        ".publish-spine",
+      ) as HTMLElement | null;
+      const spineW = spineEl
+        ? spineEl.getBoundingClientRect().width || 44
+        : 44;
       const ratio = paper.widthMm / paper.heightMm;
       const fallbackContentW =
         Math.min(720, pageHeight * ratio) - spineW - framePad;

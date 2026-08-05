@@ -84,6 +84,8 @@ export type PublishTypography = {
   spinePx: number;
   /** 页码相对书脊的倍数 */
   pageRatio: number;
+  /** 书脊栏宽度 rem（横向占宽，不随字号 scale） */
+  spineWidthRem: number;
 };
 
 export const DEFAULT_TYPOGRAPHY: PublishTypography = {
@@ -92,6 +94,7 @@ export const DEFAULT_TYPOGRAPHY: PublishTypography = {
   nameRatio: 1.55,
   spinePx: 14,
   pageRatio: 0.9,
+  spineWidthRem: 2.75,
 };
 
 export const SCALE_PRESETS: readonly {
@@ -115,6 +118,8 @@ const SPINE_MIN = 10;
 const SPINE_MAX = 22;
 const PAGE_RATIO_MIN = 0.75;
 const PAGE_RATIO_MAX = 1.2;
+const SPINE_WIDTH_MIN = 1.6;
+const SPINE_WIDTH_MAX = 5;
 
 function clamp(n: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(n)) return fallback;
@@ -141,6 +146,10 @@ export function clampPageRatio(n: number): number {
   return Math.round(clamp(n, PAGE_RATIO_MIN, PAGE_RATIO_MAX, 0.9) * 100) / 100;
 }
 
+export function clampSpineWidthRem(n: number): number {
+  return Math.round(clamp(n, SPINE_WIDTH_MIN, SPINE_WIDTH_MAX, 2.75) * 100) / 100;
+}
+
 export function normalizeTypography(
   partial: Partial<PublishTypography>,
 ): PublishTypography {
@@ -156,6 +165,9 @@ export function normalizeTypography(
     pageRatio: clampPageRatio(
       partial.pageRatio ?? DEFAULT_TYPOGRAPHY.pageRatio,
     ),
+    spineWidthRem: clampSpineWidthRem(
+      partial.spineWidthRem ?? DEFAULT_TYPOGRAPHY.spineWidthRem,
+    ),
   };
 }
 
@@ -169,22 +181,100 @@ export function typographyCssVars(
     "--pub-name-ratio": String(n.nameRatio),
     "--pub-spine-base": `${n.spinePx}px`,
     "--pub-page-ratio": String(n.pageRatio),
+    "--pub-spine-width": `${n.spineWidthRem}rem`,
   };
 }
 
 export function typographyKey(t: PublishTypography): string {
   const n = normalizeTypography(t);
-  return `${n.scale}_${n.detailRem}_${n.nameRatio}_${n.spinePx}_${n.pageRatio}`;
+  return `${n.scale}_${n.detailRem}_${n.nameRatio}_${n.spinePx}_${n.pageRatio}_${n.spineWidthRem}`;
+}
+
+/** 屏幕/打印上的大致像素（1rem≈16px），便于展示「现在多大」 */
+export function effectiveTypePx(t: PublishTypography): {
+  detail: number;
+  name: number;
+  spine: number;
+} {
+  const n = normalizeTypography(t);
+  const remPx = 16;
+  const detail = Math.round(n.detailRem * n.scale * remPx);
+  const name = Math.round(n.detailRem * n.nameRatio * n.scale * remPx);
+  const spine = Math.round(n.spinePx * n.scale);
+  return { detail, name, spine };
 }
 
 export function typographySummary(t: PublishTypography): string {
   const n = normalizeTypography(t);
-  const pct = Math.round(n.scale * 100);
-  return `字号 ${pct}% · 小传 ${n.detailRem}rem · 姓名 ×${n.nameRatio}`;
+  const px = effectiveTypePx(n);
+  return `整体${Math.round(n.scale * 100)}% · 名≈${px.name}px · 传≈${px.detail}px`;
 }
 
 export function matchScalePreset(scale: number): TypeScalePreset {
   const s = clampScale(scale);
   const hit = SCALE_PRESETS.find((p) => Math.abs(p.scale - s) < 0.001);
   return hit ? hit.id : "custom";
+}
+
+/** 分项：人话选项（映射到内部 rem / 倍数 / px） */
+export const DETAIL_SIZE_PRESETS = [
+  { id: "s", label: "偏小", rem: 0.98 },
+  { id: "m", label: "标准", rem: 1.14 },
+  { id: "l", label: "偏大", rem: 1.28 },
+  { id: "xl", label: "更大", rem: 1.4 },
+] as const;
+
+export const NAME_SIZE_PRESETS = [
+  { id: "s", label: "略大", ratio: 1.3 },
+  { id: "m", label: "标准", ratio: 1.55 },
+  { id: "l", label: "醒目", ratio: 1.8 },
+  { id: "xl", label: "特大", ratio: 2.05 },
+] as const;
+
+export const SPINE_SIZE_PRESETS = [
+  { id: "s", label: "偏小", px: 12 },
+  { id: "m", label: "标准", px: 14 },
+  { id: "l", label: "偏大", px: 16 },
+  { id: "xl", label: "更大", px: 18 },
+] as const;
+
+/** 书脊栏横向宽度（题名竖排区域） */
+export const SPINE_WIDTH_PRESETS = [
+  { id: "s", label: "偏窄", rem: 2 },
+  { id: "m", label: "标准", rem: 2.75 },
+  { id: "l", label: "偏宽", rem: 3.5 },
+  { id: "xl", label: "更宽", rem: 4.25 },
+] as const;
+
+function nearestPresetId<T extends { id: string }>(
+  presets: readonly T[],
+  pick: (p: T) => number,
+  value: number,
+): string {
+  let best = presets[0].id;
+  let bestDiff = Infinity;
+  for (const p of presets) {
+    const d = Math.abs(pick(p) - value);
+    if (d < bestDiff) {
+      bestDiff = d;
+      best = p.id;
+    }
+  }
+  return best;
+}
+
+export function matchDetailPresetId(rem: number): string {
+  return nearestPresetId(DETAIL_SIZE_PRESETS, (p) => p.rem, rem);
+}
+
+export function matchNamePresetId(ratio: number): string {
+  return nearestPresetId(NAME_SIZE_PRESETS, (p) => p.ratio, ratio);
+}
+
+export function matchSpinePresetId(px: number): string {
+  return nearestPresetId(SPINE_SIZE_PRESETS, (p) => p.px, px);
+}
+
+export function matchSpineWidthPresetId(rem: number): string {
+  return nearestPresetId(SPINE_WIDTH_PRESETS, (p) => p.rem, rem);
 }
