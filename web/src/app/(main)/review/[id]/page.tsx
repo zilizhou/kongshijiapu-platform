@@ -15,6 +15,7 @@ import {
   SessionUser,
 } from "@/lib/types";
 import Link from "next/link";
+import { networkErrorMessage, readJsonResponse } from "@/lib/api-client";
 
 function approveLabel(
   status: ChangeRequest["status"],
@@ -88,35 +89,17 @@ export default function ReviewDetailPage() {
     return item.beforeSnapshot;
   }, [item]);
 
-  function networkErrorMessage(e: unknown, fallback: string) {
-    if (e instanceof TypeError && /fetch/i.test(e.message)) {
-      return "网络异常或服务无响应，请检查连接后重试";
-    }
-    if (e instanceof Error && e.message) return e.message;
-    return fallback;
-  }
-
-  async function readJson(res: Response) {
-    const text = await res.text();
-    if (!text) return {} as Record<string, unknown>;
-    try {
-      return JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      throw new Error(res.ok ? "服务器返回了无法解析的响应" : `请求失败（${res.status}）`);
-    }
-  }
-
   async function saveOnly() {
     if (!payload) return;
     setBusy(true);
     setError("");
     try {
       const res = await fetch(`/api/requests/${params.id}`, {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload, asReviewer: true }),
       });
-      const data = await readJson(res);
+      const data = await readJsonResponse(res);
       if (!res.ok) throw new Error(String(data.error || "保存失败"));
       setItem(data.item as ChangeRequest);
       setDirty(false);
@@ -147,7 +130,7 @@ export default function ReviewDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(dirty ? { payload } : {}),
       });
-      const data = await readJson(res);
+      const data = await readJsonResponse(res);
       if (!res.ok) throw new Error(String(data.error || "通过失败"));
       setDirty(false);
       router.replace("/review");
@@ -171,7 +154,7 @@ export default function ReviewDetailPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason }),
       });
-      const data = await readJson(res);
+      const data = await readJsonResponse(res);
       if (!res.ok) throw new Error(String(data.error || "驳回失败"));
       router.replace("/review");
     } catch (e) {

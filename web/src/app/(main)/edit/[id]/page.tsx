@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { BranchForm, emptyBranchPayload } from "@/components/BranchForm";
 import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
 import { Button, Card, StatusPill } from "@/components/ui";
+import { networkErrorMessage, readJsonResponse } from "@/lib/api-client";
 import { normalizePeopleRank } from "@/lib/people-client";
 import {
   BranchPayload,
@@ -111,12 +112,16 @@ export default function EditDetailPage() {
     setSaving(true);
     setError("");
     try {
-      const res = await fetch(`/api/requests/${params.id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "删除失败");
+      const res = await fetch(`/api/requests/${params.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete" }),
+      });
+      const data = await readJsonResponse(res);
+      if (!res.ok) throw new Error(String(data.error || "删除失败"));
       router.replace("/edit");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "删除失败");
+      setError(networkErrorMessage(e, "删除失败"));
       setSaving(false);
     }
   }
@@ -144,18 +149,19 @@ export default function EditDetailPage() {
         item.objectType === "people"
           ? normalizePeopleRank(payload as PeoplePayload)
           : payload;
+      // 用 POST：避免部分环境拦截 PATCH 导致 Failed to fetch
       const res = await fetch(`/api/requests/${params.id}`, {
-        method: "PATCH",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload: body, submit }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "保存失败");
-      setItem(data.item);
+      const data = await readJsonResponse(res);
+      if (!res.ok) throw new Error(String(data.error || "保存失败"));
+      setItem(data.item as ChangeRequest);
       if (submit) router.replace("/edit");
       else await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存失败");
+      setError(networkErrorMessage(e, "保存失败"));
     } finally {
       setSaving(false);
     }

@@ -124,11 +124,26 @@ function NewEditInner() {
           submit,
         }),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: { error?: string; item?: { id: number } } = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(
+          res.ok ? "服务器返回异常" : `请求失败（${res.status}）`,
+        );
+      }
       if (!res.ok) throw new Error(data.error || "保存失败");
+      if (!data.item?.id) throw new Error("保存成功但未返回单据号");
       router.replace(`/edit/${data.item.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存失败");
+      const msg =
+        e instanceof TypeError && /fetch|network|load failed/i.test(e.message)
+          ? "网络异常或服务无响应，请检查连接后重试"
+          : e instanceof Error
+            ? e.message
+            : "保存失败";
+      setError(msg);
     } finally {
       setSaving(false);
     }

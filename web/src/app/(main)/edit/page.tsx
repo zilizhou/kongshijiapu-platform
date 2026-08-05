@@ -226,9 +226,15 @@ export default function EditListPage() {
                             }
                             const res = await fetch(
                               `/api/requests/${item.id}`,
-                              { method: "DELETE" },
+                              {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({ action: "delete" }),
+                              },
                             );
-                            const data = await res.json();
+                            const data = await res.json().catch(() => ({}));
                             if (!res.ok) {
                               alert(data.error || "删除失败");
                               return;

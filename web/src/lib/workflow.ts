@@ -317,7 +317,7 @@ export async function createRequest(opts: {
     }
 
     const submittedAtSql = opts.submit ? "NOW()" : "submitted_at";
-    await execute(
+    await query(
       `UPDATE app_change_requests SET
          payload = CAST(:payload AS JSON),
          before_snapshot = CAST(:beforeSnapshot AS JSON),

@@ -26,15 +26,32 @@ export async function GET(
   }
 }
 
-export async function PATCH(
+/**
+ * 保存/提交/删除统一走 POST。
+ * 部分局域网网关会拦截 PATCH/DELETE，浏览器只显示 Failed to fetch。
+ *
+ * body:
+ * - { payload, submit?, asReviewer? } 保存或提交
+ * - { action: "delete" } 删除编修单
+ */
+export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
   try {
     const user = await requireSession();
     const { id } = await ctx.params;
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
+
+    if (body?.action === "delete") {
+      const result = await deleteOwnRequest(Number(id), user);
+      return NextResponse.json(result);
+    }
+
     const payload = body.payload as ChangePayload;
+    if (!payload) {
+      return NextResponse.json({ error: "缺少表单数据" }, { status: 400 });
+    }
     const asReviewer = Boolean(body.asReviewer);
     const submit = Boolean(body.submit);
     const item = asReviewer
@@ -47,6 +64,15 @@ export async function PATCH(
   }
 }
 
+/** 兼容旧客户端；新代码请用 POST */
+export async function PATCH(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  return POST(req, ctx);
+}
+
+/** 兼容旧客户端；新代码请用 POST { action: "delete" } */
 export async function DELETE(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> },

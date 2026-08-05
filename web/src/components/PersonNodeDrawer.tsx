@@ -120,7 +120,7 @@ export function PersonNodeDrawer({
       // 已有驳回/暂存单：直接 PATCH 原单，避免另开一张对不上
       const res = resumableRequestId
         ? await fetch(`/api/requests/${resumableRequestId}`, {
-            method: "PATCH",
+            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ payload: body, submit: asSubmit }),
           })
