@@ -7,8 +7,8 @@ import { Button, Input, Label } from "@/components/ui";
 function LoginForm() {
   const router = useRouter();
   const sp = useSearchParams();
-  const [username, setUsername] = useState("editor");
-  const [password, setPassword] = useState("123456");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 

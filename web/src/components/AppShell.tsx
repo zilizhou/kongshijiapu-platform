@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { ROLE_LABEL, SessionUser } from "@/lib/types";
-import { Button } from "./ui";
+import { Button, Input, Label } from "./ui";
 
 type NavItem = { href: string; label: string; match?: string };
 
@@ -29,11 +29,151 @@ const navFor = (role: string): NavItem[] => {
   return items;
 };
 
+function ChangePasswordDialog({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setError("");
+    setOkMsg("");
+    setSaving(false);
+  }, [open]);
+
+  if (!open) return null;
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setOkMsg("");
+    if (newPassword !== confirmPassword) {
+      setError("两次输入的新密码不一致");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentPassword,
+          newPassword,
+          confirmPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "修改失败");
+      setOkMsg("密码已更新，请妥善保管");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      window.setTimeout(() => onClose(), 900);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "修改失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="change-password-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !saving) onClose();
+      }}
+    >
+      <form
+        className="w-full max-w-md rounded-xl border border-line bg-panel p-5 shadow-card"
+        onSubmit={onSubmit}
+      >
+        <h2
+          id="change-password-title"
+          className="font-display text-lg text-ink"
+        >
+          修改密码
+        </h2>
+        <p className="mt-1 text-xs text-muted">
+          新密码至少 8 位，且不能与当前密码相同。
+        </p>
+        <div className="mt-4 space-y-3">
+          <div>
+            <Label>当前密码</Label>
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              placeholder="当前登录密码"
+              required
+            />
+          </div>
+          <div>
+            <Label>新密码</Label>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="至少 8 位"
+              required
+              minLength={8}
+            />
+          </div>
+          <div>
+            <Label>确认新密码</Label>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="再输入一次"
+              required
+              minLength={8}
+            />
+          </div>
+        </div>
+        {error ? <p className="mt-3 text-sm text-accent">{error}</p> : null}
+        {okMsg ? <p className="mt-3 text-sm text-ok">{okMsg}</p> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={saving}
+            onClick={onClose}
+          >
+            取消
+          </Button>
+          <Button type="submit" disabled={saving}>
+            {saving ? "保存中…" : "保存"}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [pwdOpen, setPwdOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -116,16 +256,23 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="text-ink">{crumb}</span>
             </div>
           </div>
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex items-center gap-2 text-sm sm:gap-3">
             {user ? (
               <>
-                <div className="text-right leading-tight">
+                <div className="hidden text-right leading-tight sm:block">
                   <div className="font-medium text-ink">{user.displayName}</div>
                   <div className="text-xs text-muted">
                     {user.username} · {ROLE_LABEL[user.role]}
                   </div>
                 </div>
-                <Button variant="secondary" onClick={logout}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setPwdOpen(true)}
+                >
+                  修改密码
+                </Button>
+                <Button type="button" variant="secondary" onClick={logout}>
                   退出
                 </Button>
               </>
@@ -134,6 +281,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         <main className="flex-1 px-5 py-5">{children}</main>
       </div>
+
+      <ChangePasswordDialog open={pwdOpen} onClose={() => setPwdOpen(false)} />
     </div>
   );
 }

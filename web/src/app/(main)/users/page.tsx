@@ -402,7 +402,7 @@ export default function UsersPage() {
                 <Input
                   type="password"
                   value={form.password}
-                  placeholder={editItem ? "不修改请留空" : "至少 6 位"}
+                  placeholder={editItem ? "不修改请留空" : "至少 8 位"}
                   onChange={(e) =>
                     setForm({ ...form, password: e.target.value })
                   }

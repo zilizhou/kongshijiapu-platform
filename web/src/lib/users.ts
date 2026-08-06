@@ -104,8 +104,8 @@ export async function createUser(opts: {
   }
   if (!displayName) throw new Error("请填写显示名称");
   if (!isManageableRole(opts.role)) throw new Error("无效角色");
-  if (!opts.password || opts.password.length < 6) {
-    throw new Error("密码至少 6 位");
+  if (!opts.password || opts.password.length < 8) {
+    throw new Error("密码至少 8 位");
   }
 
   const exists = await query<RowDataPacket[]>(
@@ -174,7 +174,7 @@ export async function updateUser(
   }
 
   if (opts.password != null && opts.password !== "") {
-    if (opts.password.length < 6) throw new Error("密码至少 6 位");
+    if (opts.password.length < 8) throw new Error("密码至少 8 位");
     const passwordHash = await hash(opts.password, 10);
     await execute(
       `UPDATE app_users SET

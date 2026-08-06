@@ -1,12 +1,14 @@
-import { compare } from "bcryptjs";
+import { compare, hash } from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { RowDataPacket } from "mysql2";
-import { query } from "./db";
+import { query, execute } from "./db";
 import { Role, SessionUser } from "./types";
 
 const COOKIE = "kj_session";
+/** 自助改密最低长度（默认密码 123456 较弱，鼓励加长） */
+export const MIN_PASSWORD_LENGTH = 8;
 
 function secretKey() {
   const secret = process.env.AUTH_SECRET || "dev-secret";
@@ -93,6 +95,50 @@ export async function requireSession() {
   return user;
 }
 
+/**
+ * 当前登录用户修改自己的密码（须校验原密码）。
+ * 管理员重置他人密码请走 users.updateUser。
+ */
+export async function changeOwnPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+) {
+  if (!currentPassword) {
+    throw new PasswordError("请输入当前密码");
+  }
+  if (!newPassword) {
+    throw new PasswordError("请输入新密码");
+  }
+  if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    throw new PasswordError(`新密码至少 ${MIN_PASSWORD_LENGTH} 位`);
+  }
+  if (newPassword === currentPassword) {
+    throw new PasswordError("新密码不能与当前密码相同");
+  }
+
+  const rows = await query<
+    (RowDataPacket & { password_hash: string; is_active: number })[]
+  >(
+    `SELECT password_hash, is_active FROM app_users WHERE id = :id LIMIT 1`,
+    { id: userId },
+  );
+  const row = rows[0];
+  if (!row || !row.is_active) {
+    throw new AuthError("账号不可用");
+  }
+  const ok = await compare(currentPassword, row.password_hash);
+  if (!ok) {
+    throw new PasswordError("当前密码不正确");
+  }
+
+  const passwordHash = await hash(newPassword, 10);
+  await execute(
+    `UPDATE app_users SET password_hash = :passwordHash WHERE id = :id`,
+    { id: userId, passwordHash },
+  );
+}
+
 export function requireRole(user: SessionUser, roles: Role[]) {
   if (!roles.includes(user.role) && user.role !== "admin") {
     throw new AuthError("无权限");
@@ -104,6 +150,15 @@ export class AuthError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "AuthError";
+  }
+}
+
+/** 改密校验失败等（客户端可展示 message） */
+export class PasswordError extends Error {
+  status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = "PasswordError";
   }
 }
 

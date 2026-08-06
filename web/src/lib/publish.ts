@@ -378,9 +378,10 @@ export async function buildPublishByPerson(
   const focus = await getPeopleById(personId);
   if (!focus) return null;
 
-  const upN = Math.min(10, Math.max(0, up));
-  const downN = Math.min(10, Math.max(0, down));
-  const cap = 280;
+  const upN = Math.min(100, Math.max(0, Math.floor(Number(up) || 0)));
+  const downN = Math.min(100, Math.max(0, Math.floor(Number(down) || 0)));
+  // 深代数时人数可能很多，给足余量再裁切，避免“下 N 代”被人数 cap 截成远小于 N
+  const cap = Math.min(12000, Math.max(400, 200 + downN * 120));
 
   const ancestors = upN > 0 ? await getAncestors(personId, upN) : [];
   const descLite = await collectDescendants(personId, downN, cap);

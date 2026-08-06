@@ -22,7 +22,11 @@ import {
 } from "@/lib/paper";
 import type { PublishPayload } from "@/lib/publish";
 import {
+  clampDetailRem,
+  clampNameRatio,
   clampScale,
+  clampSpinePx,
+  clampSpineWidthRem,
   DEFAULT_FONT,
   DEFAULT_TYPOGRAPHY,
   DETAIL_SIZE_PRESETS,
@@ -154,7 +158,7 @@ function Stepper({
           −
         </button>
         <input
-          className="w-12 border-x border-line py-2 text-center text-sm outline-none"
+          className="w-14 border-x border-line py-2 text-center text-sm outline-none"
           value={value}
           onChange={(e) => {
             const n = Number(e.target.value.replace(/\D/g, ""));
@@ -232,10 +236,22 @@ export default function PublishPage() {
   const [customScalePct, setCustomScalePct] = useState("100");
   const [scaleIsCustom, setScaleIsCustom] = useState(false);
   const [detailRem, setDetailRem] = useState(DEFAULT_TYPOGRAPHY.detailRem);
+  const [detailIsCustom, setDetailIsCustom] = useState(false);
+  const [customDetailPx, setCustomDetailPx] = useState("");
   const [nameRatio, setNameRatio] = useState(DEFAULT_TYPOGRAPHY.nameRatio);
+  const [nameIsCustom, setNameIsCustom] = useState(false);
+  const [customNamePx, setCustomNamePx] = useState("");
   const [spinePx, setSpinePx] = useState(DEFAULT_TYPOGRAPHY.spinePx);
+  const [spineIsCustom, setSpineIsCustom] = useState(false);
+  const [customSpinePx, setCustomSpinePx] = useState(
+    String(DEFAULT_TYPOGRAPHY.spinePx),
+  );
   const [spineWidthRem, setSpineWidthRem] = useState(
     DEFAULT_TYPOGRAPHY.spineWidthRem,
+  );
+  const [spineWidthIsCustom, setSpineWidthIsCustom] = useState(false);
+  const [customSpineWidthPx, setCustomSpineWidthPx] = useState(
+    String(Math.round(DEFAULT_TYPOGRAPHY.spineWidthRem * 16)),
   );
   const [showTypeDetail, setShowTypeDetail] = useState(false);
   const [data, setData] = useState<PublishPayload | null>(null);
@@ -264,12 +280,18 @@ export default function PublishPage() {
   );
 
   const scalePreset = scaleIsCustom ? "custom" : matchScalePreset(typeScale);
-  const detailPresetId = matchDetailPresetId(detailRem);
-  const namePresetId = matchNamePresetId(nameRatio);
-  const spinePresetId = matchSpinePresetId(spinePx);
-  const spineWidthPresetId = matchSpineWidthPresetId(spineWidthRem);
+  const detailPresetId = detailIsCustom
+    ? "custom"
+    : matchDetailPresetId(detailRem);
+  const namePresetId = nameIsCustom ? "custom" : matchNamePresetId(nameRatio);
+  const spinePresetId = spineIsCustom ? "custom" : matchSpinePresetId(spinePx);
+  const spineWidthPresetId = spineWidthIsCustom
+    ? "custom"
+    : matchSpineWidthPresetId(spineWidthRem);
   const typePx = effectiveTypePx(typography);
-  const spineWidthPxApprox = Math.round(spineWidthRem * 16);
+  const spineWidthPxApprox = Math.round(
+    normalizeTypography({ spineWidthRem }).spineWidthRem * 16,
+  );
 
   const selected = nameHits.find((h) => h.id === personId) || null;
 
@@ -391,9 +413,19 @@ export default function PublishPage() {
     setCustomScalePct("100");
     setScaleIsCustom(false);
     setDetailRem(DEFAULT_TYPOGRAPHY.detailRem);
+    setDetailIsCustom(false);
+    setCustomDetailPx("");
     setNameRatio(DEFAULT_TYPOGRAPHY.nameRatio);
+    setNameIsCustom(false);
+    setCustomNamePx("");
     setSpinePx(DEFAULT_TYPOGRAPHY.spinePx);
+    setSpineIsCustom(false);
+    setCustomSpinePx(String(DEFAULT_TYPOGRAPHY.spinePx));
     setSpineWidthRem(DEFAULT_TYPOGRAPHY.spineWidthRem);
+    setSpineWidthIsCustom(false);
+    setCustomSpineWidthPx(
+      String(Math.round(DEFAULT_TYPOGRAPHY.spineWidthRem * 16)),
+    );
     setShowTypeDetail(false);
     setData(null);
     setError("");
@@ -568,14 +600,14 @@ export default function PublishPage() {
                   label="向上代数"
                   value={up}
                   min={0}
-                  max={10}
+                  max={100}
                   onChange={setUp}
                 />
                 <Stepper
                   label="向下代数"
                   value={down}
                   min={0}
-                  max={10}
+                  max={100}
                   onChange={setDown}
                 />
               </div>
@@ -813,7 +845,7 @@ export default function PublishPage() {
                     <span className="text-ink">姓名</span>
                     <span className="text-xs text-muted">约 {typePx.name}px</span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {NAME_SIZE_PRESETS.map((p) => (
                       <button
                         key={p.id}
@@ -823,11 +855,49 @@ export default function PublishPage() {
                             ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
                             : "border-line bg-white text-muted hover:bg-soft"
                         }`}
-                        onClick={() => setNameRatio(p.ratio)}
+                        onClick={() => {
+                          setNameIsCustom(false);
+                          setNameRatio(p.ratio);
+                          setCustomNamePx("");
+                        }}
                       >
                         {p.label}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      className={`rounded-md border px-2.5 py-1 text-xs ${
+                        namePresetId === "custom"
+                          ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
+                          : "border-line bg-white text-muted hover:bg-soft"
+                      }`}
+                      onClick={() => {
+                        setNameIsCustom(true);
+                        setCustomNamePx(String(typePx.name));
+                      }}
+                    >
+                      自定义
+                    </button>
+                    {namePresetId === "custom" ? (
+                      <div className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2 py-0.5">
+                        <input
+                          className="w-12 bg-transparent text-center text-xs outline-none"
+                          value={customNamePx}
+                          inputMode="numeric"
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\D/g, "");
+                            setCustomNamePx(raw);
+                            if (!raw) return;
+                            const base =
+                              detailRem * typeScale * 16 || 16;
+                            setNameRatio(
+                              clampNameRatio(Number(raw) / base),
+                            );
+                          }}
+                        />
+                        <span className="text-xs text-muted">px</span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -836,7 +906,7 @@ export default function PublishPage() {
                     <span className="text-ink">小传</span>
                     <span className="text-xs text-muted">约 {typePx.detail}px</span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {DETAIL_SIZE_PRESETS.map((p) => (
                       <button
                         key={p.id}
@@ -846,11 +916,48 @@ export default function PublishPage() {
                             ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
                             : "border-line bg-white text-muted hover:bg-soft"
                         }`}
-                        onClick={() => setDetailRem(p.rem)}
+                        onClick={() => {
+                          setDetailIsCustom(false);
+                          setDetailRem(p.rem);
+                          setCustomDetailPx("");
+                        }}
                       >
                         {p.label}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      className={`rounded-md border px-2.5 py-1 text-xs ${
+                        detailPresetId === "custom"
+                          ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
+                          : "border-line bg-white text-muted hover:bg-soft"
+                      }`}
+                      onClick={() => {
+                        setDetailIsCustom(true);
+                        setCustomDetailPx(String(typePx.detail));
+                      }}
+                    >
+                      自定义
+                    </button>
+                    {detailPresetId === "custom" ? (
+                      <div className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2 py-0.5">
+                        <input
+                          className="w-12 bg-transparent text-center text-xs outline-none"
+                          value={customDetailPx}
+                          inputMode="numeric"
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\D/g, "");
+                            setCustomDetailPx(raw);
+                            if (!raw) return;
+                            const base = typeScale * 16 || 16;
+                            setDetailRem(
+                              clampDetailRem(Number(raw) / base),
+                            );
+                          }}
+                        />
+                        <span className="text-xs text-muted">px</span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -859,7 +966,7 @@ export default function PublishPage() {
                     <span className="text-ink">书脊字号</span>
                     <span className="text-xs text-muted">约 {typePx.spine}px</span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {SPINE_SIZE_PRESETS.map((p) => (
                       <button
                         key={p.id}
@@ -869,11 +976,48 @@ export default function PublishPage() {
                             ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
                             : "border-line bg-white text-muted hover:bg-soft"
                         }`}
-                        onClick={() => setSpinePx(p.px)}
+                        onClick={() => {
+                          setSpineIsCustom(false);
+                          setSpinePx(p.px);
+                          setCustomSpinePx(String(p.px));
+                        }}
                       >
                         {p.label}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      className={`rounded-md border px-2.5 py-1 text-xs ${
+                        spinePresetId === "custom"
+                          ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
+                          : "border-line bg-white text-muted hover:bg-soft"
+                      }`}
+                      onClick={() => {
+                        setSpineIsCustom(true);
+                        setCustomSpinePx(String(typePx.spine));
+                      }}
+                    >
+                      自定义
+                    </button>
+                    {spinePresetId === "custom" ? (
+                      <div className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2 py-0.5">
+                        <input
+                          className="w-12 bg-transparent text-center text-xs outline-none"
+                          value={customSpinePx}
+                          inputMode="numeric"
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\D/g, "");
+                            setCustomSpinePx(raw);
+                            if (!raw) return;
+                            const scale = typeScale || 1;
+                            setSpinePx(
+                              clampSpinePx(Number(raw) / scale),
+                            );
+                          }}
+                        />
+                        <span className="text-xs text-muted">px</span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -884,7 +1028,7 @@ export default function PublishPage() {
                       约 {spineWidthPxApprox}px
                     </span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {SPINE_WIDTH_PRESETS.map((p) => (
                       <button
                         key={p.id}
@@ -894,14 +1038,51 @@ export default function PublishPage() {
                             ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
                             : "border-line bg-white text-muted hover:bg-soft"
                         }`}
-                        onClick={() => setSpineWidthRem(p.rem)}
+                        onClick={() => {
+                          setSpineWidthIsCustom(false);
+                          setSpineWidthRem(p.rem);
+                          setCustomSpineWidthPx(String(Math.round(p.rem * 16)));
+                        }}
                       >
                         {p.label}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      className={`rounded-md border px-2.5 py-1 text-xs ${
+                        spineWidthPresetId === "custom"
+                          ? "border-[#5b8fd9] bg-white text-[#5b8fd9]"
+                          : "border-line bg-white text-muted hover:bg-soft"
+                      }`}
+                      onClick={() => {
+                        setSpineWidthIsCustom(true);
+                        setCustomSpineWidthPx(String(spineWidthPxApprox));
+                      }}
+                    >
+                      自定义
+                    </button>
+                    {spineWidthPresetId === "custom" ? (
+                      <div className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2 py-0.5">
+                        <input
+                          className="w-12 bg-transparent text-center text-xs outline-none"
+                          value={customSpineWidthPx}
+                          inputMode="numeric"
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\D/g, "");
+                            setCustomSpineWidthPx(raw);
+                            if (raw) {
+                              setSpineWidthRem(
+                                clampSpineWidthRem(Number(raw) / 16),
+                              );
+                            }
+                          }}
+                        />
+                        <span className="text-xs text-muted">px</span>
+                      </div>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-xs text-muted">
-                    左侧题名栏（如「中興祖至分戶」）横向占宽
+                    左侧题名栏（如「中興祖至分戶」）横向占宽；自定义为约屏显/打印像素
                   </p>
                 </div>
 
@@ -910,9 +1091,21 @@ export default function PublishPage() {
                   className="text-xs text-muted hover:text-ink hover:underline"
                   onClick={() => {
                     setDetailRem(DEFAULT_TYPOGRAPHY.detailRem);
+                    setDetailIsCustom(false);
+                    setCustomDetailPx("");
                     setNameRatio(DEFAULT_TYPOGRAPHY.nameRatio);
+                    setNameIsCustom(false);
+                    setCustomNamePx("");
                     setSpinePx(DEFAULT_TYPOGRAPHY.spinePx);
+                    setSpineIsCustom(false);
+                    setCustomSpinePx(String(DEFAULT_TYPOGRAPHY.spinePx));
                     setSpineWidthRem(DEFAULT_TYPOGRAPHY.spineWidthRem);
+                    setSpineWidthIsCustom(false);
+                    setCustomSpineWidthPx(
+                      String(
+                        Math.round(DEFAULT_TYPOGRAPHY.spineWidthRem * 16),
+                      ),
+                    );
                   }}
                 >
                   单项恢复标准
