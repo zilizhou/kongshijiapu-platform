@@ -2816,14 +2816,44 @@ export async function getLineageTree(
     await expandLineageTreeChildren(tree, relatedIds, maxLevel);
   }
 
-  // 将无法唯一挂靠的谱上父名叠在树顶，便于世系图向上可见
+  // 将无法唯一挂靠的谱上父名叠在树顶；并按父名聚合同级兄弟姐妹（旧谱常用手法）
   for (let i = unresolvedAbove.length - 1; i >= 0; i--) {
     const a = unresolvedAbove[i];
+    const parentName = a.name.trim();
+    const siblings = parentName
+      ? await findNameOnlySiblings(rootPerson, parentName)
+      : [];
+    const childNodes: LineageNode[] = [];
+    if (siblings.length) {
+      for (const sib of siblings) {
+        relatedIds.add(sib.id);
+        if (sib.id === rootPerson.id) {
+          childNodes.push(tree);
+          continue;
+        }
+        let sibTree = toLineageNode(sib);
+        // 为兄弟节点补一层子代（与当前向下范围一致）
+        if (Number(sib.level ?? 0) < maxLevel) {
+          const kids = await getChildren(sib.id);
+          sibTree = {
+            ...sibTree,
+            children: kids
+              .filter((k) => Number(k.level ?? 0) <= maxLevel)
+              .map((k) => {
+                relatedIds.add(k.id);
+                return toLineageNode(k);
+              }),
+          };
+        }
+        childNodes.push(sibTree);
+      }
+    }
+    if (!childNodes.length) childNodes.push(tree);
     tree = {
       ...toLineageNode(a),
       rank: a.rank || "未挂靠",
       unresolved: true,
-      children: [tree],
+      children: childNodes,
     };
   }
 
@@ -3009,6 +3039,41 @@ async function resolveUniqueParentByName(
   );
   if (rows.length !== 1) return null;
   return mapRow(rows[0]);
+}
+
+/** 旧谱父 ID=0 时：按父名+同派+同世找兄弟姐妹（旧系统世系图即如此聚合） */
+async function findNameOnlySiblings(
+  person: PeopleRow,
+  parentName: string,
+): Promise<PeopleRow[]> {
+  const name = parentName.trim();
+  if (!name || person.level == null) return [];
+  const variants = searchTextVariants(name);
+  if (!variants.length) return [];
+  const namePh = variants.map((_, i) => `:pn${i}`).join(",");
+  const params: Record<string, unknown> = {
+    lv: person.level,
+    grp: person.groupName || "",
+  };
+  variants.forEach((v, i) => {
+    params[`pn${i}`] = v;
+  });
+  const rows = await query<PeopleDb[]>(
+    `SELECT ${YIZI_SELECT}
+     FROM tb_people p
+     JOIN tb_people_relation r ON r.F_PEOPLE_ID = p.F_ID
+     WHERE IFNULL(r.F_PARENT_ID, 0) = 0
+       AND r.F_PARENT_NAME IN (${namePh})
+       AND p.F_LEVEL = :lv
+       AND IFNULL(p.F_GROUP, '') = :grp
+     ORDER BY p.F_LEFT ASC, p.F_ID ASC
+     LIMIT 80`,
+    params,
+  );
+  const list = rows.map(mapRow);
+  // 确保当前人在列（即使其 relation 已被补成有父 ID）
+  if (!list.some((p) => p.id === person.id)) list.push(person);
+  return list.sort((a, b) => a.id - b.id);
 }
 
 function nameOnlyAncestorRow(
