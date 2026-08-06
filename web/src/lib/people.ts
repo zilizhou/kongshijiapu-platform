@@ -285,15 +285,23 @@ async function pushParentScopeExists(
 
   if (fatherName && grandfatherName) {
     const fMatch = personNameMatchSql("f_af.F_NAME", fatherName, "afn", params);
+    const fMatchRel = personNameMatchSql("r_c.F_PARENT_NAME", fatherName, "afr", params);
     const gMatch = personNameMatchSql("gf_af.F_NAME", grandfatherName, "agn", params);
+    const gMatchRel = personNameMatchSql("r_f.F_PARENT_NAME", grandfatherName, "agr", params);
     if (hasRelation) {
+      // 父/祖父既可走 F_PARENT_ID→人员表，也可走 relation 上的姓名（旧谱常有姓名无 ID）
       orParts.push(
         `EXISTS (
           SELECT 1 FROM tb_people_relation r_c
-          INNER JOIN tb_people f_af ON f_af.F_ID = r_c.F_PARENT_ID
-          INNER JOIN tb_people_relation r_f ON r_f.F_PEOPLE_ID = f_af.F_ID
-          INNER JOIN tb_people gf_af ON gf_af.F_ID = r_f.F_PARENT_ID
-          WHERE r_c.F_PEOPLE_ID = p.F_ID AND ${fMatch} AND ${gMatch}
+          LEFT JOIN tb_people f_af
+            ON f_af.F_ID = r_c.F_PARENT_ID AND r_c.F_PARENT_ID > 0
+          LEFT JOIN tb_people_relation r_f
+            ON r_f.F_PEOPLE_ID = f_af.F_ID
+          LEFT JOIN tb_people gf_af
+            ON gf_af.F_ID = r_f.F_PARENT_ID AND r_f.F_PARENT_ID > 0
+          WHERE r_c.F_PEOPLE_ID = p.F_ID
+            AND (${fMatch} OR ${fMatchRel})
+            AND (${gMatch} OR ${gMatchRel})
         )`,
       );
     }
@@ -314,12 +322,14 @@ async function pushParentScopeExists(
     where.push(`(${orParts.join(" OR ")})`);
   } else if (fatherName) {
     const fMatch = personNameMatchSql("f_fn.F_NAME", fatherName, "fnm", params);
+    const fMatchRel = personNameMatchSql("r_fn.F_PARENT_NAME", fatherName, "fnr", params);
     if (hasRelation) {
       orParts.push(
         `EXISTS (
           SELECT 1 FROM tb_people_relation r_fn
-          INNER JOIN tb_people f_fn ON f_fn.F_ID = r_fn.F_PARENT_ID
-          WHERE r_fn.F_PEOPLE_ID = p.F_ID AND ${fMatch}
+          LEFT JOIN tb_people f_fn
+            ON f_fn.F_ID = r_fn.F_PARENT_ID AND r_fn.F_PARENT_ID > 0
+          WHERE r_fn.F_PEOPLE_ID = p.F_ID AND (${fMatch} OR ${fMatchRel})
         )`,
       );
     }
@@ -337,13 +347,15 @@ async function pushParentScopeExists(
     where.push(`(${orParts.join(" OR ")})`);
   } else if (grandfatherName) {
     const gMatch = personNameMatchSql("gf_gn.F_NAME", grandfatherName, "gnm", params);
+    const gMatchRel = personNameMatchSql("r_g1.F_PARENT_NAME", grandfatherName, "gnr", params);
     if (hasRelation) {
       orParts.push(
         `EXISTS (
           SELECT 1 FROM tb_people_relation r_g2
           INNER JOIN tb_people_relation r_g1 ON r_g1.F_PEOPLE_ID = r_g2.F_PARENT_ID
-          INNER JOIN tb_people gf_gn ON gf_gn.F_ID = r_g1.F_PARENT_ID
-          WHERE r_g2.F_PEOPLE_ID = p.F_ID AND ${gMatch}
+          LEFT JOIN tb_people gf_gn
+            ON gf_gn.F_ID = r_g1.F_PARENT_ID AND r_g1.F_PARENT_ID > 0
+          WHERE r_g2.F_PEOPLE_ID = p.F_ID AND (${gMatch} OR ${gMatchRel})
         )`,
       );
     }

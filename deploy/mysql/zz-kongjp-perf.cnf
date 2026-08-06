@@ -1,0 +1,6 @@
+[mysqld]
+# Genealogy working set is >> default 128M; host has 15Gi RAM
+innodb_buffer_pool_size = 2G
+innodb_buffer_pool_instances = 2
+tmp_table_size = 64M
+max_heap_table_size = 64M
