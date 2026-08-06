@@ -2773,7 +2773,16 @@ export async function getLineageTree(
 
   const ancestors =
     up > 0 ? await getAncestors(id, up) : ([] as PeopleRow[]);
-  const rootPerson = ancestors[0] ?? focus;
+  // 谱名未挂靠节点 id < 0，不能作为树根去查库；用第一个真实祖先建树后再向上包裹
+  const firstRealIdx = ancestors.findIndex((a) => a.id > 0);
+  const unresolvedAbove =
+    firstRealIdx > 0
+      ? ancestors.slice(0, firstRealIdx)
+      : firstRealIdx < 0
+        ? ancestors.filter((a) => a.id < 0)
+        : [];
+  const rootPerson =
+    firstRealIdx >= 0 ? ancestors[firstRealIdx] : focus;
   const focusLevel = Number(focus.level ?? 0);
   const maxLevel = focusLevel + down;
   const rootLevel = Number(rootPerson.level ?? focusLevel);
@@ -2782,7 +2791,7 @@ export async function getLineageTree(
   const relatedIds = new Set<number>([
     focus.id,
     rootPerson.id,
-    ...ancestors.map((a) => a.id),
+    ...ancestors.filter((a) => a.id > 0).map((a) => a.id),
   ]);
 
   let tree: LineageNode = toLineageNode(rootPerson);
@@ -2805,6 +2814,17 @@ export async function getLineageTree(
 
     // nested-set 漏挂平台新录；直系补丁也不够——对图上所有节点按关系表向下补全
     await expandLineageTreeChildren(tree, relatedIds, maxLevel);
+  }
+
+  // 将无法唯一挂靠的谱上父名叠在树顶，便于世系图向上可见
+  for (let i = unresolvedAbove.length - 1; i >= 0; i--) {
+    const a = unresolvedAbove[i];
+    tree = {
+      ...toLineageNode(a),
+      rank: a.rank || "未挂靠",
+      unresolved: true,
+      children: [tree],
+    };
   }
 
   collectLineageIds(tree, relatedIds);
@@ -2960,6 +2980,82 @@ const YIZI_SELECT = `p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             NULL AS F_PROFESSIONAL_TITLE, NULL AS F_COLLEGE, NULL AS F_DEGREE,
             0 AS child_count`;
 
+/** 旧谱「有父名无父ID」时：同名+上一代+同派户支唯一则解析为真实父亲 */
+async function resolveUniqueParentByName(
+  parentName: string,
+  childLevel: number | null,
+  childGroup: string | null,
+): Promise<PeopleRow | null> {
+  const name = parentName.trim();
+  if (!name || childLevel == null || childLevel <= 1) return null;
+  const variants = searchTextVariants(name);
+  if (!variants.length) return null;
+  const namePh = variants.map((_, i) => `:pn${i}`).join(",");
+  const params: Record<string, unknown> = {
+    lv: childLevel - 1,
+    grp: childGroup || "",
+  };
+  variants.forEach((v, i) => {
+    params[`pn${i}`] = v;
+  });
+  const rows = await query<PeopleDb[]>(
+    `SELECT ${YIZI_SELECT}
+     FROM tb_people p
+     WHERE p.F_NAME IN (${namePh})
+       AND p.F_LEVEL = :lv
+       AND IFNULL(p.F_GROUP, '') = :grp
+     LIMIT 3`,
+    params,
+  );
+  if (rows.length !== 1) return null;
+  return mapRow(rows[0]);
+}
+
+function nameOnlyAncestorRow(
+  childId: number,
+  parentName: string,
+  childLevel: number | null,
+): PeopleRow {
+  return {
+    id: -1_000_000_000 - childId,
+    name: parentName.trim(),
+    sex: "男",
+    no: null,
+    level: childLevel != null && childLevel > 0 ? childLevel - 1 : null,
+    groupName: null,
+    birthday: null,
+    deathday: null,
+    address: null,
+    pinyin: null,
+    alias: null,
+    zi: null,
+    hao: null,
+    isHeir: null,
+    originalData: null,
+    lngLat: null,
+    editTime: null,
+    parentId: null,
+    parentName: null,
+    birthFatherId: null,
+    birthFatherName: null,
+    rank: "未挂靠",
+    siblingOrder: null,
+    spouse: null,
+    spouseInfo: null,
+    description: null,
+    volume: null,
+    phone: null,
+    company: null,
+    position: null,
+    professionalTitle: null,
+    college: null,
+    degree: null,
+    createTime: null,
+    createAdmin: null,
+    childCount: 0,
+  };
+}
+
 /** 直系父链：一次查出候选，每世取最紧包围节点（避免逐代全表扫） */
 async function getDirectAncestorLine(
   id: number,
@@ -2981,7 +3077,48 @@ async function getDirectAncestorLine(
          LIMIT 1`,
         { id: currentId },
       );
-      const parent = rows[0] ? mapRow(rows[0]) : null;
+      let parent = rows[0] ? mapRow(rows[0]) : null;
+
+      // 父 ID 缺失：尝试唯一解析；仍无法确定则用谱上父名占位（世系图可显示）
+      if (!parent) {
+        const relMeta = await query<RowDataPacket[]>(
+          `SELECT r.F_PARENT_NAME AS parentName, p.F_LEVEL AS lv, p.F_GROUP AS grp
+           FROM tb_people_relation r
+           JOIN tb_people p ON p.F_ID = r.F_PEOPLE_ID
+           WHERE r.F_PEOPLE_ID = :id
+             AND IFNULL(r.F_PARENT_ID, 0) = 0
+             AND IFNULL(r.F_PARENT_NAME, '') <> ''
+           LIMIT 1`,
+          { id: currentId },
+        );
+        const meta = relMeta[0];
+        if (!meta) break;
+        const parentName = String(meta.parentName || "").trim();
+        const lv = meta.lv == null ? null : Number(meta.lv);
+        const grp = meta.grp == null ? null : String(meta.grp);
+        const resolved = await resolveUniqueParentByName(parentName, lv, grp);
+        if (resolved && !seen.has(resolved.id)) {
+          try {
+            await execute(
+              `UPDATE tb_people_relation
+               SET F_PARENT_ID = :pid, F_PARENT_NO = LEFT(IFNULL(:pno, ''), 10)
+               WHERE F_PEOPLE_ID = :cid AND IFNULL(F_PARENT_ID, 0) = 0`,
+              {
+                pid: resolved.id,
+                pno: resolved.no || "",
+                cid: currentId,
+              },
+            );
+          } catch {
+            /* 补链失败不影响展示 */
+          }
+          parent = resolved;
+        } else {
+          chain.unshift(nameOnlyAncestorRow(currentId, parentName, lv));
+          break;
+        }
+      }
+
       if (!parent || seen.has(parent.id)) break;
       chain.unshift(parent);
       seen.add(parent.id);

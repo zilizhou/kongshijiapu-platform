@@ -174,6 +174,8 @@ export type LineageNode = {
   /** 未入库的待审新增节点 */
   pending?: boolean;
   requestId?: number;
+  /** 旧谱仅有父名、未挂靠到具体人员（不可点开详情） */
+  unresolved?: boolean;
 };
 
 export const ROLE_LABEL: Record<Role, string> = {

@@ -75,10 +75,18 @@ function Stepper({
 
 function nodeTone(
   sex: string,
-  opts: { focus?: boolean; reviewing?: boolean; pending?: boolean },
+  opts: {
+    focus?: boolean;
+    reviewing?: boolean;
+    pending?: boolean;
+    unresolved?: boolean;
+  },
 ): string {
   if (opts.pending) {
     return "border-dashed border-[#0d9488] bg-[#ccfbf1] text-[#0f766e] hover:bg-[#99f6e4]";
+  }
+  if (opts.unresolved) {
+    return "border-dashed border-[#b45309] bg-[#fff7ed] text-[#9a3412] hover:bg-[#ffedd5]";
   }
   if (opts.focus) {
     return "border-[#c9a227] bg-[#c9a227] text-white shadow-card";
@@ -111,6 +119,7 @@ function PersonCard({
     rank?: string | null;
     pending?: boolean;
     requestId?: number;
+    unresolved?: boolean;
   };
   focusId: number;
   reviewingIds: Set<number>;
@@ -120,34 +129,38 @@ function PersonCard({
   onContextMenu: (e: React.MouseEvent, node: { id: number; name: string }) => void;
 }) {
   const pending = Boolean(p.pending);
-  const focus = !pending && p.id === focusId;
-  const reviewing = !pending && reviewingIds.has(p.id);
+  const unresolved = Boolean(p.unresolved) || (!pending && p.id < 0);
+  const focus = !pending && !unresolved && p.id === focusId;
+  const reviewing = !pending && !unresolved && reviewingIds.has(p.id);
   return (
     <button
       type="button"
       className={`inline-flex min-w-[92px] flex-col items-center rounded-lg border-2 px-3 py-2 text-center transition ${nodeTone(
         p.sex,
-        { focus, reviewing, pending },
+        { focus, reviewing, pending, unresolved },
       )}`}
       title={
         pending
           ? canEdit
             ? `待审新增 · 编修单 #${p.requestId} · 左键查看编修单 · 右键可再增父/兄/子`
             : `待审新增 · 编修单 #${p.requestId}`
-          : focus
-            ? "当前人物 · 点击查看详情"
-            : reviewing
-              ? "有未完成变更 · 点击查看详情"
-              : canEdit
-                ? "左键详情/编辑 · 右键新增 · 拖拽兄弟调整长幼"
-                : "点击查看详情"
+          : unresolved
+            ? "旧谱仅记父名，同名过多未能挂靠到具体人员"
+            : focus
+              ? "当前人物 · 点击查看详情"
+              : reviewing
+                ? "有未完成变更 · 点击查看详情"
+                : canEdit
+                  ? "左键详情/编辑 · 右键新增 · 拖拽兄弟调整长幼"
+                  : "点击查看详情"
       }
       onClick={() => {
+        if (unresolved) return;
         if (pending && p.requestId) onOpenPending(p.requestId);
         else onOpen(p.id);
       }}
       onContextMenu={(e) => {
-        if (!canEdit) return;
+        if (!canEdit || unresolved) return;
         e.preventDefault();
         e.stopPropagation();
         onContextMenu(e, { id: p.id, name: p.name });
@@ -156,11 +169,15 @@ function PersonCard({
       <span className="font-display text-base">{p.name}</span>
       {pending ? (
         <span className="mt-0.5 text-[11px] font-medium">待审新增</span>
+      ) : unresolved ? (
+        <span className="mt-0.5 text-[11px] font-medium">未挂靠</span>
       ) : p.rank ? (
         <span className="mt-0.5 text-[11px] font-medium text-white">{p.rank}</span>
       ) : null}
       <span
-        className={`mt-0.5 text-[11px] ${pending ? "text-[#0f766e]/80" : "text-white/85"}`}
+        className={`mt-0.5 text-[11px] ${
+          pending || unresolved ? "text-current/70" : "text-white/85"
+        }`}
       >
         {p.sex} · 第{p.level ?? "?"}世
       </span>
@@ -214,6 +231,7 @@ function TreeBranch({
   const canDrag =
     canEdit &&
     !node.pending &&
+    !node.unresolved &&
     realKids.length > 1 &&
     (!overflow || siblingsExpanded);
 
@@ -618,6 +636,10 @@ function LineageInner() {
           <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1">
             <span className="h-2.5 w-2.5 rounded-sm border border-dashed border-[#0d9488] bg-[#ccfbf1]" />
             青绿虚线：待审新增
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1">
+            <span className="h-2.5 w-2.5 rounded-sm border border-dashed border-[#b45309] bg-[#fff7ed]" />
+            橙虚线：谱名未挂靠
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-2.5 py-1">
             <span className="h-2.5 w-2.5 rounded-sm bg-[#c9a227]" />
