@@ -183,6 +183,32 @@ export default function PeoplePage() {
     setHydrated(true);
   }, []);
 
+  /** 外链带 ?id= 时直接打开该成员详情（如挂接管理跳转） */
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") return;
+    const id = Number(new URLSearchParams(window.location.search).get("id"));
+    if (!Number.isFinite(id) || id <= 0) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/people/${id}`);
+        const data = await res.json();
+        if (cancelled || !res.ok || !data.person) return;
+        const p = data.person as PeopleRow;
+        setDrawer(p);
+        setName(p.name);
+        setFilters((prev) => ({ ...prev, name: p.name }));
+        setPage(1);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated]);
+
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
     abortRef.current?.abort();
