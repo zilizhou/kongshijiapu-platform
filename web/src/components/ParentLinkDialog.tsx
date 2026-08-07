@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button } from "./ui";
 import type { ParentLinkPreviewItem } from "@/lib/parent-link-queue";
+import type { PeopleRow } from "@/lib/types";
 
 type ResultRow = {
   queueId: number;
@@ -215,6 +216,96 @@ type Candidate = {
   parentName: string | null;
 };
 
+function dash(v: string | null | undefined) {
+  return v && String(v).trim() ? String(v) : "-";
+}
+
+function formatGroup(g: string | null | undefined) {
+  if (!g) return "-";
+  const parts = g
+    .split(/[,，/]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!parts.length) return "-";
+  return parts.reverse().join("/");
+}
+
+function CandidateDetailDrawer({
+  person,
+  loading,
+  onClose,
+}: {
+  person: PeopleRow | null;
+  loading: boolean;
+  onClose: () => void;
+}) {
+  if (!person && !loading) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex justify-end bg-black/30"
+      onClick={onClose}
+    >
+      <div
+        className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-start justify-between gap-2">
+          <div>
+            <div className="font-display text-xl">
+              {loading ? "加载中…" : person?.name}
+            </div>
+            {person ? (
+              <div className="mt-1 text-sm text-stone-500">
+                ID {person.id} · {person.sex} · 第 {person.level ?? "?"} 世
+              </div>
+            ) : null}
+          </div>
+          <Button variant="ghost" onClick={onClose}>
+            关闭
+          </Button>
+        </div>
+        {person ? (
+          <>
+            <div className="mb-4 flex flex-wrap gap-2 border-b border-stone-100 pb-4">
+              <Link
+                href={`/people/${person.id}/lineage`}
+                className="inline-flex rounded bg-[#2f6b4f] px-2 py-1 text-xs text-white"
+                target="_blank"
+              >
+                世系图
+              </Link>
+              <Link
+                href={`/people?id=${person.id}`}
+                className="inline-flex rounded bg-stone-500 px-2 py-1 text-xs text-white"
+                target="_blank"
+              >
+                家谱管理
+              </Link>
+            </div>
+            <dl className="space-y-3 text-sm">
+              {[
+                ["所属派户支", formatGroup(person.groupName)],
+                ["谱号", person.no],
+                ["父名", person.parentName],
+                ["地址", person.address],
+                ["生年", person.birthday],
+                ["卒年", person.deathday],
+                ["配偶", person.spouse],
+                ["小传", person.description],
+              ].map(([k, v]) => (
+                <div key={k}>
+                  <dt className="text-xs text-stone-400">{k}</dt>
+                  <dd className="mt-0.5 whitespace-pre-wrap">{dash(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function ParentLinkActionDialog({
   open,
   row,
@@ -242,6 +333,8 @@ export function ParentLinkActionDialog({
   const [parentName, setParentName] = useState("");
   const [parentSex, setParentSex] = useState<"男" | "女">("男");
   const [parentLevel, setParentLevel] = useState("");
+  const [detailPerson, setDetailPerson] = useState<PeopleRow | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !row) return;
@@ -253,6 +346,8 @@ export function ParentLinkActionDialog({
     setParentLevel(row.level != null ? String(row.level - 1) : "");
     setSelectedParentId("");
     setCandidates([]);
+    setDetailPerson(null);
+    setDetailLoading(false);
   }, [open, row]);
 
   useEffect(() => {
@@ -273,6 +368,21 @@ export function ParentLinkActionDialog({
   }, [open, row, tab, searchName]);
 
   if (!open || !row) return null;
+
+  async function openCandidateDetail(id: number) {
+    setDetailLoading(true);
+    setDetailPerson(null);
+    try {
+      const res = await fetch(`/api/people/${id}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "加载失败");
+      setDetailPerson(data.person as PeopleRow);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载详情失败");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
 
   async function linkExisting() {
     if (!selectedParentId) {
@@ -399,31 +509,33 @@ export function ParentLinkActionDialog({
                   <p className="p-2 text-xs text-stone-400">无候选（可切换「新建父亲」）</p>
                 )}
                 {candidates.map((c) => (
-                  <label
+                  <div
                     key={c.id}
-                    className="flex cursor-pointer gap-2 border-b px-2 py-1.5 text-xs hover:bg-stone-50"
+                    className="flex items-center gap-2 border-b px-2 py-1.5 text-xs hover:bg-stone-50"
                   >
-                    <input
-                      type="radio"
-                      name="parentPick"
-                      checked={selectedParentId === c.id}
-                      onChange={() => setSelectedParentId(c.id)}
-                    />
-                    <span>
-                      {c.name} · ID {c.id} · {c.level ?? "?"}世
-                      <br />
-                      <span className="text-stone-400">{c.groupName || "-"}</span>
-                    </span>
-                  </label>
+                    <label className="flex min-w-0 flex-1 cursor-pointer gap-2">
+                      <input
+                        type="radio"
+                        name="parentPick"
+                        checked={selectedParentId === c.id}
+                        onChange={() => setSelectedParentId(c.id)}
+                      />
+                      <span className="min-w-0">
+                        {c.name} · ID {c.id} · {c.level ?? "?"}世
+                        <br />
+                        <span className="text-stone-400">{c.groupName || "-"}</span>
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      className="shrink-0 text-blue-600 hover:underline"
+                      onClick={() => openCandidateDetail(c.id)}
+                    >
+                      详情
+                    </button>
+                  </div>
                 ))}
               </div>
-              <Link
-                href={`/people?id=${row.peopleId}`}
-                className="text-xs text-blue-600 hover:underline"
-                target="_blank"
-              >
-                在家谱管理中查看该成员
-              </Link>
             </div>
           )}
 
@@ -494,6 +606,15 @@ export function ParentLinkActionDialog({
           </div>
         </div>
       </div>
+
+      <CandidateDetailDrawer
+        person={detailPerson}
+        loading={detailLoading}
+        onClose={() => {
+          setDetailPerson(null);
+          setDetailLoading(false);
+        }}
+      />
     </div>
   );
 }
