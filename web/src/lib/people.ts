@@ -1,6 +1,6 @@
 import { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { resolvePeopleGroupPatterns } from "./branch";
-import { execute, query } from "./db";
+import { execute, query, withTransaction } from "./db";
 import {
   composeLegacyAlias,
   extractCourtesyFromDescription,
@@ -1585,6 +1585,62 @@ async function applyPeopleCreateAsParent(
     await refreshParentChildren(conn, id);
   }
   return id;
+}
+
+/** 将已有成员挂接到指定父亲（更新 relation / 世代 / 兄弟序） */
+export async function linkPeopleToParent(childId: number, parentId: number) {
+  if (childId === parentId) throw new Error("不能将自己设为父亲");
+  return withTransaction(async (conn) => {
+    const [parents] = await conn.query<
+      (RowDataPacket & {
+        F_LEVEL: number | null;
+        F_NAME: string;
+        F_NO: string | null;
+      })[]
+    >(
+      `SELECT F_LEVEL, F_NAME, F_NO FROM tb_people WHERE F_ID = ? LIMIT 1`,
+      [parentId],
+    );
+    const parent = parents[0];
+    if (!parent) throw new Error("父亲不存在");
+
+    const [children] = await conn.query<
+      (RowDataPacket & { F_LEVEL: number | null })[]
+    >(`SELECT F_LEVEL FROM tb_people WHERE F_ID = ? LIMIT 1`, [childId]);
+    if (!children[0]) throw new Error("成员不存在");
+
+    const parentLevel = Number(parent.F_LEVEL || 0);
+    const newLevel = parentLevel > 0 ? parentLevel + 1 : null;
+
+    if (await tableExists("tb_people_relation")) {
+      await upsertPeopleRelationParent(conn, {
+        peopleId: childId,
+        parentId,
+        parentName: parent.F_NAME,
+        parentNo: parent.F_NO || "",
+      });
+    }
+
+    await ensureSiblingOrderTable();
+    await conn.execute(
+      `INSERT INTO app_sibling_order (people_id, parent_id, sort_no)
+       VALUES (?, ?, 999999)
+       ON DUPLICATE KEY UPDATE parent_id = VALUES(parent_id)`,
+      [childId, parentId],
+    );
+
+    if (newLevel != null) {
+      await conn.execute(`UPDATE tb_people SET F_LEVEL = ? WHERE F_ID = ?`, [
+        newLevel,
+        childId,
+      ]);
+    }
+
+    if (await tableExists("tb_people_relation")) {
+      await refreshParentChildren(conn, parentId);
+    }
+    return { childId, parentId };
+  });
 }
 
 async function insertPeopleRow(

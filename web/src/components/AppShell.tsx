@@ -13,6 +13,7 @@ const navFor = (role: string): NavItem[] => {
     { href: "/dashboard", label: "首页" },
     { href: "/people", label: "家谱管理", match: "/people" },
     { href: "/daikao", label: "待考管理", match: "/daikao" },
+    { href: "/parent-link", label: "挂接管理", match: "/parent-link" },
     { href: "/branches", label: "派户支管理", match: "/branches" },
   ];
   if (role === "editor" || role === "admin") {
