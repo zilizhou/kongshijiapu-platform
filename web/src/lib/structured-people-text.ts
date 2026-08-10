@@ -1,3 +1,4 @@
+import { nameToPinyin } from "./pinyin";
 import type { PeoplePayload } from "./types";
 
 /** 结构化续修文本解析出的一人 */
@@ -159,12 +160,13 @@ export function parseStructuredPeopleText(text: string): ParsedPerson[] {
   return people;
 }
 
-/** 转为表单补丁（仅含有值的字段） */
+/** 转为表单补丁（仅含有值的字段；姓名自动带拼音） */
 export function parsedPersonToPayloadPatch(
   p: ParsedPerson,
 ): Partial<PeoplePayload> {
   const patch: Partial<PeoplePayload> = {
     name: p.name,
+    pinyin: nameToPinyin(p.name),
   };
   if (p.sex) patch.sex = p.sex;
   if (p.birthday) patch.birthday = p.birthday;

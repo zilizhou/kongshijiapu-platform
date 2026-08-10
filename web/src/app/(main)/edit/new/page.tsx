@@ -178,7 +178,7 @@ function NewEditInner() {
                 variant="secondary"
                 onClick={() => setTextFillOpen(true)}
               >
-                粘贴文本填入
+                粘贴文本导入
               </Button>
             ) : null}
             {isAdmit ? (
