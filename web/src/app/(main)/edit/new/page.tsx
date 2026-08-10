@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
 import { PeopleListBackLink } from "@/components/PeopleListBackLink";
-import { StructuredTextFillDialog } from "@/components/StructuredTextFillDialog";
 import { Button, Card } from "@/components/ui";
 import { normalizePeopleRank, peopleToPayload } from "@/lib/people-client";
 import { PeoplePayload, PeopleRow } from "@/lib/types";
@@ -36,8 +35,6 @@ function NewEditInner() {
       parentName: string | null;
     }[]
   >([]);
-  const [textFillOpen, setTextFillOpen] = useState(false);
-
   useEffect(() => {
     if (daikaoId) {
       setLoading(true);
@@ -171,33 +168,22 @@ function NewEditInner() {
               </p>
             ) : null}
           </div>
-          <div className="flex items-center gap-3">
-            {!loading && op === "create" ? (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setTextFillOpen(true)}
-              >
-                粘贴文本导入
-              </Button>
-            ) : null}
-            {isAdmit ? (
-              <Link
-                href="/daikao"
-                className="text-xl leading-none text-muted hover:text-ink"
-                aria-label="关闭"
-              >
-                ×
-              </Link>
-            ) : (
-              <PeopleListBackLink
-                className="text-xl leading-none text-muted hover:text-ink"
-                aria-label="关闭"
-              >
-                ×
-              </PeopleListBackLink>
-            )}
-          </div>
+          {isAdmit ? (
+            <Link
+              href="/daikao"
+              className="text-xl leading-none text-muted hover:text-ink"
+              aria-label="关闭"
+            >
+              ×
+            </Link>
+          ) : (
+            <PeopleListBackLink
+              className="text-xl leading-none text-muted hover:text-ink"
+              aria-label="关闭"
+            >
+              ×
+            </PeopleListBackLink>
+          )}
         </div>
 
         <div className="max-h-[calc(100vh-220px)] overflow-y-auto px-5 py-5">
@@ -285,13 +271,6 @@ function NewEditInner() {
           </div>
         </div>
       </Card>
-
-      <StructuredTextFillDialog
-        open={textFillOpen}
-        onClose={() => setTextFillOpen(false)}
-        current={payload}
-        onApply={setPayload}
-      />
     </div>
   );
 }

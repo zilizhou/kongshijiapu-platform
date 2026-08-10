@@ -24,6 +24,7 @@ import {
 } from "@/lib/people-source";
 import { BranchPicker } from "@/components/BranchPicker";
 import { PeopleImportDialog } from "@/components/PeopleImportDialog";
+import { StructuredTextFillDialog } from "@/components/StructuredTextFillDialog";
 import { PaginationBar } from "@/components/PaginationBar";
 import {
   Button,
@@ -135,6 +136,7 @@ export default function PeoplePage() {
   const [error, setError] = useState("");
   const [drawer, setDrawer] = useState<PeopleRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [textImportOpen, setTextImportOpen] = useState(false);
   /** 先从 sessionStorage 恢复查询条件，再发请求，避免返回列表时闪成全量 */
   const [hydrated, setHydrated] = useState(false);
   const loadSeq = useRef(0);
@@ -635,6 +637,12 @@ export default function PeoplePage() {
                 <Button variant="secondary" onClick={() => setImportOpen(true)}>
                   批量导入
                 </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setTextImportOpen(true)}
+                >
+                  粘贴文本导入
+                </Button>
                 <Link href="/edit/new">
                   <Button>新增家谱成员</Button>
                 </Link>
@@ -886,6 +894,11 @@ export default function PeoplePage() {
       <PeopleImportDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
+        onDone={() => load()}
+      />
+      <StructuredTextFillDialog
+        open={textImportOpen}
+        onClose={() => setTextImportOpen(false)}
         onDone={() => load()}
       />
     </div>

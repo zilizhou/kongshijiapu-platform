@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { emptyPayload } from "@/components/PeopleForm";
-import { BranchPicker } from "@/components/BranchPicker";
+import { useState } from "react";
+import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
 import { normalizePeopleRank } from "@/lib/people-client";
 import {
-  mergeStructuredPatch,
   parseStructuredPeopleText,
   parsedPersonToPayloadPatch,
   type ParsedPerson,
@@ -19,48 +17,37 @@ type CreatedInfo = {
   submitted: boolean;
 };
 
-function DetailRow({ label, value }: { label: string; value?: string }) {
-  return (
-    <div className="grid grid-cols-[5.5rem_1fr] gap-2 text-sm">
-      <dt className="text-muted">{label}</dt>
-      <dd className="whitespace-pre-wrap text-ink">{value?.trim() || "-"}</dd>
-    </div>
-  );
+function buildPayloadFromParsed(person: ParsedPerson): PeoplePayload {
+  const patch = parsedPersonToPayloadPatch(person);
+  return normalizePeopleRank({
+    ...emptyPayload(),
+    ...patch,
+    sex: (patch.sex as "男" | "女") || "男",
+    originalData: "1",
+  });
 }
 
 export function StructuredTextFillDialog({
   open,
   onClose,
-  current,
-  onApply,
+  onDone,
 }: {
   open: boolean;
   onClose: () => void;
-  current: PeoplePayload;
-  onApply: (next: PeoplePayload) => void;
+  onDone?: () => void;
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const [people, setPeople] = useState<ParsedPerson[]>([]);
   const [selected, setSelected] = useState(0);
-  const [group, setGroup] = useState("");
+  const [drafts, setDrafts] = useState<Record<number, PeoplePayload>>({});
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<Record<number, CreatedInfo>>({});
 
-  useEffect(() => {
-    if (!open) return;
-    setGroup(current.group || "");
-  }, [open, current.group]);
-
   const preview = people[selected] ?? null;
+  const draft =
+    preview != null ? drafts[preview.index] ?? buildPayloadFromParsed(preview) : null;
   const createdInfo = preview ? created[preview.index] : undefined;
-
-  const contextHint = useMemo(() => {
-    const parts: string[] = [];
-    if (current.parentId) parts.push(`当前父 ID ${current.parentId}`);
-    if (current.level != null) parts.push(`${current.level} 世`);
-    return parts.join(" · ");
-  }, [current.parentId, current.level]);
 
   if (!open) return null;
 
@@ -69,9 +56,14 @@ export function StructuredTextFillDialog({
     setError("");
     setPeople([]);
     setSelected(0);
+    setDrafts({});
     setBusy(false);
     setCreated({});
-    setGroup(current.group || "");
+  }
+
+  function ensureDraft(person: ParsedPerson, map: Record<number, PeoplePayload>) {
+    if (map[person.index]) return map;
+    return { ...map, [person.index]: buildPayloadFromParsed(person) };
   }
 
   function runParse() {
@@ -80,39 +72,29 @@ export function StructuredTextFillDialog({
     const list = parseStructuredPeopleText(text);
     if (!list.length) {
       setPeople([]);
+      setDrafts({});
       setError("未能解析出成员，请确认格式（如「1. 姓名」及「生年：…」）");
       return;
     }
+    const nextDrafts: Record<number, PeoplePayload> = {};
+    for (const p of list) {
+      nextDrafts[p.index] = buildPayloadFromParsed(p);
+    }
     setPeople(list);
+    setDrafts(nextDrafts);
     setSelected(0);
   }
 
-  function buildCreatePayload(person: ParsedPerson): PeoplePayload {
-    const patch = parsedPersonToPayloadPatch(person);
-    const base = emptyPayload();
-    return normalizePeopleRank({
-      ...base,
-      ...patch,
-      sex: (patch.sex as "男" | "女") || "男",
-      group: group.trim(),
-      parentId: current.parentId ?? null,
-      level: current.level ?? null,
-      originalData: current.originalData || "1",
-    });
-  }
-
-  function applyFill() {
-    if (!preview) {
-      setError("请先解析并选择一位成员");
-      return;
-    }
-    const patch = parsedPersonToPayloadPatch(preview);
-    onApply(mergeStructuredPatch(current, patch));
+  function selectPerson(i: number) {
+    const person = people[i];
+    if (!person) return;
+    setSelected(i);
     setError("");
+    setDrafts((prev) => ensureDraft(person, prev));
   }
 
   async function createPerson(submit: boolean) {
-    if (!preview) {
+    if (!preview || !draft) {
       setError("请先选择一位成员");
       return;
     }
@@ -120,15 +102,18 @@ export function StructuredTextFillDialog({
       setError("该成员已创建变更单，可点击单号继续编辑或提交");
       return;
     }
-    if (!group.trim()) {
-      setError("新增须填写所属派户支");
+    if (!draft.name?.trim()) {
+      setError("请填写姓名");
+      return;
+    }
+    if (!draft.group?.trim()) {
+      setError("请填写所属派户支");
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const payload = buildCreatePayload(preview);
-      if (!payload.name.trim()) throw new Error("姓名不能为空");
+      const payload = normalizePeopleRank(draft);
       const res = await fetch("/api/requests", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -147,6 +132,7 @@ export function StructuredTextFillDialog({
         ...prev,
         [preview.index]: { requestId, submitted: submit },
       }));
+      onDone?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "创建失败");
     } finally {
@@ -156,12 +142,12 @@ export function StructuredTextFillDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+      <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
         <div className="flex items-start justify-between border-b border-line px-5 py-4">
           <div>
             <h2 className="text-base font-semibold">粘贴文本导入</h2>
             <p className="mt-1 text-xs text-muted">
-              解析后点选成员查看详情；可填入当前表单，或直接新增生成编修变更单（走一/二/终审）。
+              解析后点选成员，在右侧表单核对/修改后新增，生成编修变更单（走一/二/终审）。
             </p>
           </div>
           <button
@@ -176,15 +162,15 @@ export function StructuredTextFillDialog({
           </button>
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-5 py-4">
           {!people.length ? (
-            <>
+            <div className="space-y-4 overflow-y-auto">
               <div>
                 <label className="mb-1 block text-xs text-muted">
                   结构化文本
                 </label>
                 <Textarea
-                  className="min-h-[220px] font-mono text-sm"
+                  className="min-h-[240px] font-mono text-sm"
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   placeholder={`示例：\n4. 令钧\n生年：1944年8月12日\n学历：中专　毕业学校：……\n妻：岳彩萍\n子女一：德浩\n现住址：……`}
@@ -198,29 +184,18 @@ export function StructuredTextFillDialog({
               >
                 解析文本
               </Button>
-            </>
+            </div>
           ) : (
-            <>
-              <div className="flex flex-wrap items-end gap-3 rounded border border-line bg-soft/40 px-3 py-2">
-                <div className="min-w-[220px] flex-1">
-                  <label className="mb-1 block text-xs text-muted">
-                    新增时使用的派户支（必填）
-                  </label>
-                  <BranchPicker
-                    value={group}
-                    onChange={setGroup}
-                    placeholder="输入名称搜索派户支"
-                  />
-                </div>
-                <div className="text-xs text-muted">
-                  {contextHint || "未带入父亲/代数（可先从世系图「新增子女」进入）"}
-                </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-3">
+              <div className="flex items-center justify-between text-xs text-muted">
+                <span>已解析 {people.length} 人，点选后可在右侧编辑表单</span>
                 <button
                   type="button"
-                  className="text-xs text-accent"
+                  className="text-accent"
                   onClick={() => {
                     setPeople([]);
                     setSelected(0);
+                    setDrafts({});
                     setCreated({});
                     setError("");
                   }}
@@ -229,9 +204,9 @@ export function StructuredTextFillDialog({
                 </button>
               </div>
 
-              <div className="grid min-h-[320px] gap-3 md:grid-cols-[14rem_1fr]">
-                <div className="overflow-auto rounded border border-line">
-                  <div className="border-b border-line px-2 py-1.5 text-xs text-muted">
+              <div className="grid min-h-0 flex-1 gap-3 md:grid-cols-[14rem_1fr]">
+                <div className="min-h-0 overflow-auto rounded border border-line">
+                  <div className="sticky top-0 border-b border-line bg-white px-2 py-1.5 text-xs text-muted">
                     共 {people.length} 人
                   </div>
                   <ul className="p-1">
@@ -246,10 +221,7 @@ export function StructuredTextFillDialog({
                                 ? "bg-soft ring-1 ring-accent/40"
                                 : ""
                             }`}
-                            onClick={() => {
-                              setSelected(i);
-                              setError("");
-                            }}
+                            onClick={() => selectPerson(i)}
                           >
                             <div className="font-medium">{p.name}</div>
                             <div className="text-xs text-muted">
@@ -267,38 +239,9 @@ export function StructuredTextFillDialog({
                   </ul>
                 </div>
 
-                <div className="rounded border border-line p-4">
-                  {preview ? (
+                <div className="min-h-0 overflow-auto rounded border border-line p-4">
+                  {draft ? (
                     <div className="space-y-3">
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <h3 className="font-display text-lg text-ink">
-                          {preview.name}
-                        </h3>
-                        <span className="text-xs text-muted">
-                          拼音：
-                          {parsedPersonToPayloadPatch(preview).pinyin || "-"}
-                        </span>
-                      </div>
-                      <dl className="space-y-1.5">
-                        <DetailRow label="性别" value={preview.sex} />
-                        <DetailRow label="生年" value={preview.birthday} />
-                        <DetailRow label="卒年" value={preview.deathday} />
-                        <DetailRow label="学历" value={preview.degree} />
-                        <DetailRow label="毕业学校" value={preview.college} />
-                        <DetailRow label="工作单位" value={preview.company} />
-                        <DetailRow label="联系电话" value={preview.phone} />
-                        <DetailRow label="配偶" value={preview.spouse} />
-                        <DetailRow
-                          label="子女"
-                          value={
-                            preview.children.length
-                              ? preview.children.join("；")
-                              : ""
-                          }
-                        />
-                        <DetailRow label="现住址" value={preview.address} />
-                      </dl>
-
                       {createdInfo ? (
                         <div className="rounded border border-line bg-soft/50 px-3 py-2 text-sm">
                           已生成变更单{" "}
@@ -313,13 +256,24 @@ export function StructuredTextFillDialog({
                             : "（暂存，可打开后继续编辑并提交）"}
                         </div>
                       ) : null}
+                      <PeopleForm
+                        value={draft}
+                        disabled={Boolean(createdInfo)}
+                        onChange={(next) => {
+                          if (!preview) return;
+                          setDrafts((prev) => ({
+                            ...prev,
+                            [preview.index]: next,
+                          }));
+                        }}
+                      />
                     </div>
                   ) : (
                     <div className="text-sm text-muted">请选择左侧成员</div>
                   )}
                 </div>
               </div>
-            </>
+            </div>
           )}
 
           {error ? <div className="text-sm text-danger">{error}</div> : null}
@@ -338,14 +292,6 @@ export function StructuredTextFillDialog({
           </Button>
           {people.length ? (
             <>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={!preview || busy}
-                onClick={applyFill}
-              >
-                填入当前表单
-              </Button>
               <Button
                 type="button"
                 variant="secondary"
