@@ -463,7 +463,7 @@ export type OfficialParentCandidate = {
 
 export type OfficialParentResolve = {
   parentId: number | null;
-  parentMatch: "none" | "unique" | "ambiguous";
+  parentMatch: "none" | "unique" | "ambiguous" | "female_only";
   parentName: string;
   parentCandidates: OfficialParentCandidate[];
 };
@@ -539,7 +539,7 @@ export type AdmitPreviewItem = {
   ok: boolean;
   error?: string;
   parentName: string;
-  parentMatch: "none" | "unique" | "ambiguous";
+  parentMatch: "none" | "unique" | "ambiguous" | "female_only";
   parentId: number | null;
   parentCandidates: OfficialParentCandidate[];
 };

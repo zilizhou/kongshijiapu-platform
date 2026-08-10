@@ -22,8 +22,6 @@ type Stats = {
   daikaoFemale: number;
   daikaoRoots: number;
   daikaoErrors: number;
-  parentLinkPending?: number;
-  parentLinkTotal?: number;
   draft: number;
   pending_1: number;
   pending_2: number;
@@ -187,9 +185,6 @@ export default function DashboardPage() {
             <Link href="/daikao">
               <Button variant="secondary">待考管理</Button>
             </Link>
-            <Link href="/parent-link">
-              <Button variant="secondary">挂接管理</Button>
-            </Link>
             {canEdit ? (
               <Link href="/edit">
                 <Button>我的编修</Button>
@@ -246,22 +241,6 @@ export default function DashboardPage() {
                   tone:
                     (stats?.daikaoErrors || 0) > 0 ? "text-danger" : undefined,
                 },
-              ]}
-            />
-            <StatBlock
-              title="父名挂接"
-              accent="border-t-warn"
-              total={stats?.parentLinkPending || 0}
-              rows={[
-                {
-                  label: "待挂接",
-                  value: stats?.parentLinkPending || 0,
-                  tone:
-                    (stats?.parentLinkPending || 0) > 0
-                      ? "text-danger"
-                      : undefined,
-                },
-                { label: "队列总数", value: stats?.parentLinkTotal || 0 },
               ]}
             />
             <StatBlock

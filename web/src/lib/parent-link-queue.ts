@@ -139,7 +139,15 @@ function groupPrefix(group: string | null | undefined) {
   return g.split(",")[0]?.trim() || g;
 }
 
-/** 按子节点派户支/世代收窄父亲候选 */
+function isMaleParent(sex: string | null | undefined) {
+  return (sex || "").trim() === "男";
+}
+
+function maleParentCandidates(candidates: OfficialParentCandidate[]) {
+  return candidates.filter((p) => isMaleParent(p.sex));
+}
+
+/** 按子节点派户支/世代收窄父亲候选（仅男性） */
 export async function resolveScopedParent(
   parentNameRaw: string | null | undefined,
   child: { level: number | null; groupName: string | null },
@@ -148,9 +156,19 @@ export async function resolveScopedParent(
   const parentName = base.parentName;
   if (!parentName || !base.parentCandidates.length) return base;
 
+  const males = maleParentCandidates(base.parentCandidates);
+  if (!males.length) {
+    return {
+      parentId: null,
+      parentMatch: "female_only",
+      parentName,
+      parentCandidates: [],
+    };
+  }
+
   const childLevel = child.level;
   const prefix = groupPrefix(child.groupName);
-  const scoped = base.parentCandidates.filter((p) => {
+  const scoped = males.filter((p) => {
     if (childLevel != null && p.level != null && p.level !== childLevel - 1) {
       return false;
     }
@@ -160,7 +178,7 @@ export async function resolveScopedParent(
     return g === child.groupName || g.startsWith(prefix);
   });
 
-  const list = scoped.length ? scoped : base.parentCandidates;
+  const list = scoped.length ? scoped : males;
   if (scoped.length === 1) {
     return {
       parentId: scoped[0].id,
@@ -306,7 +324,7 @@ export type ParentLinkPreviewItem = {
   level: number | null;
   groupName: string | null;
   parentNameText: string;
-  parentMatch: "none" | "unique" | "ambiguous";
+  parentMatch: "none" | "unique" | "ambiguous" | "female_only";
   parentId: number | null;
   parentCandidates: OfficialParentCandidate[];
   ok: boolean;
@@ -376,6 +394,9 @@ export async function previewParentLink(
     if (parent.parentMatch === "ambiguous") {
       ok = false;
       error = `父亲「${parent.parentName}」重名，请选择`;
+    } else if (parent.parentMatch === "female_only") {
+      ok = false;
+      error = `谱上父名「${parent.parentName}」仅匹配到女性，请选手动男性父亲或新建`;
     } else if (parent.parentName && parent.parentMatch === "none") {
       ok = false;
       error = `未找到父亲「${parent.parentName}」，请新建或手动选择`;
@@ -530,6 +551,7 @@ export async function searchParentCandidates(opts: {
   const variants = new Set(searchTextVariants(name));
   let items = found.items
     .filter((x) => variants.has(x.name))
+    .filter((x) => isMaleParent(x.sex))
     .map((p) => ({
       id: p.id,
       name: p.name,
