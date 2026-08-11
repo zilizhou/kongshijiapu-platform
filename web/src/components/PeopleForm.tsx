@@ -198,6 +198,7 @@ export function PeopleForm({
         <PersonPicker
           disabled={disabled}
           valueId={value.parentId}
+          groupFilter={value.group || ""}
           placeholder="输入姓名搜索当前父"
           onChange={(id) => set("parentId", id)}
         />
@@ -460,6 +461,7 @@ export function PeopleForm({
         <PersonPicker
           disabled={disabled}
           valueId={value.birthFatherId}
+          groupFilter={value.group || ""}
           placeholder="输入姓名搜索原生父"
           onChange={(id) => set("birthFatherId", id)}
         />

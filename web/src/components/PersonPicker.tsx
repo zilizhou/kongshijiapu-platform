@@ -25,11 +25,14 @@ export function PersonPicker({
   disabled,
   placeholder,
   onChange,
+  /** 与派户支联合查询：有值时默认按该派户支缩小同名范围 */
+  groupFilter,
 }: {
   valueId: number | null | undefined;
   disabled?: boolean;
   placeholder?: string;
   onChange: (id: number | null) => void;
+  groupFilter?: string;
 }) {
   const [keyword, setKeyword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -38,9 +41,18 @@ export function PersonPicker({
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  /** 有派户支时默认开启联合查询；可临时关闭以搜全库 */
+  const [useGroup, setUseGroup] = useState(true);
   const boxRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchSeq = useRef(0);
+  const groupTrimmed = (groupFilter || "").trim();
+  const activeGroup = useGroup && groupTrimmed ? groupTrimmed : "";
+
+  useEffect(() => {
+    // 表单派户支变化时，重新默认开启联合查询
+    setUseGroup(true);
+  }, [groupTrimmed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +78,6 @@ export function PersonPicker({
           const status = String(d.item?.status || "");
           const objectId = d.item?.objectId != null ? Number(d.item.objectId) : 0;
           if (status === "approved" && objectId > 0) {
-            // 仅展示姓名；正 ID 升格由详情 hydrate 完成，避免此处 onChange 误标 dirty
             setDisplayName(name);
             setKeyword("");
             return;
@@ -111,7 +122,12 @@ export function PersonPicker({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  async function fetchPage(q: string, nextPage: number, append: boolean) {
+  async function fetchPage(
+    q: string,
+    nextPage: number,
+    append: boolean,
+    group: string,
+  ) {
     const seq = ++searchSeq.current;
     setLoading(true);
     try {
@@ -124,6 +140,9 @@ export function PersonPicker({
       // 完整汉字名：精确匹配，避免前缀把同名挤出前几页
       if (looksLikeChineseName(trimmed)) {
         sp.set("exactName", "1");
+      }
+      if (group) {
+        sp.set("group", group);
       }
       const res = await fetch(`/api/people?${sp}`);
       const data = await res.json().catch(() => ({}));
@@ -146,7 +165,7 @@ export function PersonPicker({
     }
   }
 
-  function search(q: string) {
+  function search(q: string, group = activeGroup) {
     if (timer.current) clearTimeout(timer.current);
     if (!q.trim()) {
       setHits([]);
@@ -155,9 +174,16 @@ export function PersonPicker({
       return;
     }
     timer.current = setTimeout(() => {
-      void fetchPage(q, 1, false);
+      void fetchPage(q, 1, false, group);
     }, 250);
   }
+
+  // 派户支开关或表单派户支变化时，若正在搜姓名则重查
+  useEffect(() => {
+    if (!keyword.trim()) return;
+    search(keyword, activeGroup);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅随筛选条件重查
+  }, [activeGroup]);
 
   const showSelected = valueId != null && valueId !== 0 && displayName && !keyword;
   const canLoadMore = hits.length < total;
@@ -190,7 +216,12 @@ export function PersonPicker({
           clearable
           disabled={disabled}
           value={keyword}
-          placeholder={placeholder || "输入姓名搜索"}
+          placeholder={
+            placeholder ||
+            (groupTrimmed
+              ? "输入姓名搜索（可与派户支联合）"
+              : "输入姓名搜索")
+          }
           onChange={(e) => {
             const v = e.target.value;
             setKeyword(v);
@@ -201,12 +232,40 @@ export function PersonPicker({
           }}
         />
       )}
+
+      {!showSelected && !disabled ? (
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
+          {groupTrimmed ? (
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <input
+                type="checkbox"
+                className="accent-accent"
+                checked={useGroup}
+                onChange={(e) => setUseGroup(e.target.checked)}
+              />
+              <span>
+                限定派户支
+                <span className="ml-1 text-ink/80" title={groupTrimmed}>
+                  （{groupTrimmed.length > 18
+                    ? `${groupTrimmed.slice(0, 18)}…`
+                    : groupTrimmed}
+                  ）
+                </span>
+              </span>
+            </label>
+          ) : (
+            <span>先填写「所属派户支」后，可按派户支缩小同名父亲范围</span>
+          )}
+        </div>
+      ) : null}
+
       {open && (hits.length || loading || total > 0) ? (
         <div className="absolute z-30 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-line bg-white shadow-card">
-          {!loading && total > 0 ? (
+          {!loading && (total > 0 || activeGroup) ? (
             <div className="sticky top-0 border-b border-line bg-white px-3 py-1.5 text-[11px] text-muted">
               共 {total} 人
               {looksLikeChineseName(keyword) ? "（精确姓名）" : ""}
+              {activeGroup ? " · 已按派户支筛选" : ""}
               {hits.length < total ? `，已显示 ${hits.length}` : ""}
             </div>
           ) : null}
@@ -240,13 +299,20 @@ export function PersonPicker({
               type="button"
               className="block w-full border-t border-line px-3 py-2 text-center text-xs text-accent hover:bg-soft"
               disabled={loading}
-              onClick={() => void fetchPage(keyword, page + 1, true)}
+              onClick={() =>
+                void fetchPage(keyword, page + 1, true, activeGroup)
+              }
             >
               {loading ? "加载中…" : `加载更多（还有 ${total - hits.length} 人）`}
             </button>
           ) : null}
           {!loading && !hits.length ? (
-            <div className="px-3 py-2 text-xs text-muted">无匹配人物</div>
+            <div className="px-3 py-2 text-xs text-muted">
+              无匹配人物
+              {activeGroup
+                ? "（可取消「限定派户支」后在全库重试）"
+                : ""}
+            </div>
           ) : null}
         </div>
       ) : null}
