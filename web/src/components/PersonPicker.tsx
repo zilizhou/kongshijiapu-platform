@@ -3,14 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import { Input } from "./ui";
 
-type Hit = {
+interface Hit {
   id: number;
   name: string;
   sex: string;
   no: string | null;
   level: number | null;
   groupName: string | null;
-};
+  parentName?: string | null;
+}
+
+const PAGE_SIZE = 100;
+
+function looksLikeChineseName(q: string): boolean {
+  const t = q.trim();
+  return t.length >= 2 && /^[\u4e00-\u9fff·•]+$/.test(t);
+}
 
 export function PersonPicker({
   valueId,
@@ -26,10 +34,13 @@ export function PersonPicker({
   const [keyword, setKeyword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,8 +101,6 @@ export function PersonPicker({
     return () => {
       cancelled = true;
     };
-    // onChange 稳定由父组件保证；仅随 valueId 解析展示
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valueId]);
 
   useEffect(() => {
@@ -102,35 +111,56 @@ export function PersonPicker({
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
+  async function fetchPage(q: string, nextPage: number, append: boolean) {
+    const seq = ++searchSeq.current;
+    setLoading(true);
+    try {
+      const trimmed = q.trim();
+      const sp = new URLSearchParams({
+        name: trimmed,
+        pageSize: String(PAGE_SIZE),
+        page: String(nextPage),
+      });
+      // 完整汉字名：精确匹配，避免前缀把同名挤出前几页
+      if (looksLikeChineseName(trimmed)) {
+        sp.set("exactName", "1");
+      }
+      const res = await fetch(`/api/people?${sp}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "搜索失败");
+      if (seq !== searchSeq.current) return;
+      const items = (data.items || []) as Hit[];
+      setTotal(Number(data.total || 0));
+      setPage(nextPage);
+      setHits((prev) => (append ? [...prev, ...items] : items));
+      setOpen(true);
+    } catch {
+      if (seq !== searchSeq.current) return;
+      if (!append) {
+        setHits([]);
+        setTotal(0);
+      }
+      setOpen(true);
+    } finally {
+      if (seq === searchSeq.current) setLoading(false);
+    }
+  }
+
   function search(q: string) {
     if (timer.current) clearTimeout(timer.current);
     if (!q.trim()) {
       setHits([]);
+      setTotal(0);
+      setPage(1);
       return;
     }
-    timer.current = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const sp = new URLSearchParams({
-          name: q.trim(),
-          pageSize: "20",
-          page: "1",
-        });
-        const res = await fetch(`/api/people?${sp}`);
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || "搜索失败");
-        setHits((data.items || []) as Hit[]);
-        setOpen(true);
-      } catch {
-        setHits([]);
-        setOpen(true);
-      } finally {
-        setLoading(false);
-      }
+    timer.current = setTimeout(() => {
+      void fetchPage(q, 1, false);
     }, 250);
   }
 
   const showSelected = valueId != null && valueId !== 0 && displayName && !keyword;
+  const canLoadMore = hits.length < total;
 
   return (
     <div ref={boxRef} className="relative">
@@ -148,6 +178,7 @@ export function PersonPicker({
                 setDisplayName("");
                 setKeyword("");
                 setHits([]);
+                setTotal(0);
               }}
             >
               清除
@@ -170,9 +201,16 @@ export function PersonPicker({
           }}
         />
       )}
-      {open && (hits.length || loading) ? (
-        <div className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-line bg-white shadow-card">
-          {loading ? (
+      {open && (hits.length || loading || total > 0) ? (
+        <div className="absolute z-30 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-line bg-white shadow-card">
+          {!loading && total > 0 ? (
+            <div className="sticky top-0 border-b border-line bg-white px-3 py-1.5 text-[11px] text-muted">
+              共 {total} 人
+              {looksLikeChineseName(keyword) ? "（精确姓名）" : ""}
+              {hits.length < total ? `，已显示 ${hits.length}` : ""}
+            </div>
+          ) : null}
+          {loading && !hits.length ? (
             <div className="px-3 py-2 text-xs text-muted">搜索中...</div>
           ) : null}
           {hits.map((h) => (
@@ -192,10 +230,21 @@ export function PersonPicker({
                 {h.sex}
                 {h.level != null ? ` · 第${h.level}世` : ""}
                 {h.groupName ? ` · ${h.groupName}` : ""}
+                {h.parentName ? ` · 父:${h.parentName}` : ""}
                 {` · #${h.id}`}
               </div>
             </button>
           ))}
+          {canLoadMore ? (
+            <button
+              type="button"
+              className="block w-full border-t border-line px-3 py-2 text-center text-xs text-accent hover:bg-soft"
+              disabled={loading}
+              onClick={() => void fetchPage(keyword, page + 1, true)}
+            >
+              {loading ? "加载中…" : `加载更多（还有 ${total - hits.length} 人）`}
+            </button>
+          ) : null}
           {!loading && !hits.length ? (
             <div className="px-3 py-2 text-xs text-muted">无匹配人物</div>
           ) : null}
