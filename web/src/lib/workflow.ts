@@ -21,6 +21,7 @@ import {
   applyPeopleUpdate,
   applySiblingReorder,
   clearYiziCache,
+  ensurePeoplePhoneColumn,
   getPeopleById,
   peopleToPayload,
 } from "./people";
@@ -638,6 +639,7 @@ export async function approveRequest(
       return getRequestById(id);
     }
 
+    await ensurePeoplePhoneColumn();
     await withTransaction(async (conn) => {
       let peoplePayload = req.payload as PeoplePayload;
       if (req.operation === "create") {

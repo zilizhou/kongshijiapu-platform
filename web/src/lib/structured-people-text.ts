@@ -1,4 +1,5 @@
 import { nameToPinyin } from "./pinyin";
+import { formatPhones, parsePhones } from "./phone";
 import type { PeoplePayload } from "./types";
 
 /** 结构化续修文本解析出的一人 */
@@ -142,7 +143,7 @@ function parseOneBlock(block: string, index: number): ParsedPerson | null {
     degree: normalizeEmpty(map.get("学历") || "") || undefined,
     college: normalizeEmpty(map.get("毕业学校") || map.get("毕业院校") || "") || undefined,
     company,
-    phone: normalizeEmpty(map.get("联系电话") || map.get("电话") || "") || undefined,
+    phone: formatPhones(parsePhones(normalizeEmpty(map.get("联系电话") || map.get("电话") || ""))) || undefined,
     spouse: spouse || undefined,
     sex,
     children,

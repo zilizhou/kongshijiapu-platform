@@ -8,6 +8,7 @@ import {
 } from "./courtesy";
 import { peopleToPayload } from "./people-client";
 import { LineageNode, PeoplePayload, PeopleRow } from "./types";
+import { normalizePhoneForStore, PEOPLE_PHONE_MAX_CHARS } from "./phone";
 
 export { peopleToPayload };
 import {
@@ -802,6 +803,63 @@ export async function ensureCourtesyTable() {
     courtesyTableReady = true;
   } catch {
     // 导入期元数据锁时跳过建表，读路径降级为仅从描述抽取
+  }
+}
+
+let phoneColumnReady = false;
+
+/**
+ * 将 tb_people_info.F_PHONE 扩到可存多个号码。
+ * 目标 60 字：utf8mb4 最大 240 字节，长度前缀仍为 1 字节，MySQL 8 可 INSTANT。
+ */
+export async function ensurePeoplePhoneColumn() {
+  if (phoneColumnReady) return;
+  if (!(await tableExists("tb_people_info"))) {
+    phoneColumnReady = true;
+    return;
+  }
+  const rows = await query<RowDataPacket[]>(
+    `SELECT CHARACTER_MAXIMUM_LENGTH AS len,
+            CHARACTER_SET_NAME AS cs,
+            COLLATION_NAME AS col,
+            IS_NULLABLE AS nullable
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'tb_people_info'
+       AND column_name = 'F_PHONE'
+     LIMIT 1`,
+  );
+  const row = rows[0];
+  if (!row) {
+    phoneColumnReady = true;
+    return;
+  }
+  const len = Number(row.len || 0);
+  if (len >= PEOPLE_PHONE_MAX_CHARS) {
+    phoneColumnReady = true;
+    return;
+  }
+  const nullable = String(row.nullable) === "YES" ? "NULL" : "NOT NULL";
+  const charset = row.cs ? String(row.cs) : "";
+  const collation = row.col ? String(row.col) : "";
+  const ident = /^[a-zA-Z0-9_]+$/;
+  const charsetSql =
+    ident.test(charset) && ident.test(collation)
+      ? `CHARACTER SET ${charset} COLLATE ${collation}`
+      : "";
+  const sql = `ALTER TABLE tb_people_info
+    MODIFY COLUMN F_PHONE VARCHAR(${PEOPLE_PHONE_MAX_CHARS}) ${charsetSql} ${nullable}
+    COMMENT '联系电话，多个用顿号分隔'`;
+  try {
+    await execute(`${sql}, ALGORITHM=INSTANT`);
+    phoneColumnReady = true;
+  } catch {
+    try {
+      await execute(sql);
+      phoneColumnReady = true;
+    } catch {
+      // 无权限或锁表时下次再试
+    }
   }
 }
 
@@ -1657,6 +1715,7 @@ async function insertPeopleRow(
     parentNo: string;
   },
 ) {
+  await ensurePeoplePhoneColumn();
   const zi = normalizeCourtesyPart("zi", payload.zi);
   const hao = normalizeCourtesyPart("hao", payload.hao);
   const legacyAlias = composeLegacyAlias(zi, hao, payload.alias || "");
@@ -1715,7 +1774,7 @@ async function insertPeopleRow(
         payload.spouse || "",
         payload.spouseInfo || "",
         payload.volume || "",
-        payload.phone || "",
+        normalizePhoneForStore(payload.phone),
       ],
     );
   }
@@ -1757,6 +1816,8 @@ export async function applyPeopleUpdate(
     payload.alias || "",
   );
   const createTime = normalizeCreateTime(payload.createTime);
+  const phone = normalizePhoneForStore(payload.phone);
+  await ensurePeoplePhoneColumn();
   await conn.execute(
     `UPDATE tb_people SET
       F_NAME = ?, F_SEX = ?, F_NO = ?, F_LEVEL = ?, F_GROUP = ?,
@@ -1795,7 +1856,7 @@ export async function applyPeopleUpdate(
       payload.spouse || "",
       payload.spouseInfo || "",
       payload.volume || "",
-      payload.phone || "",
+      phone,
       payload.company || "",
       payload.position || "",
       payload.professionalTitle || "",

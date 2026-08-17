@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { formatPhones, parsePhones } from "./phone";
 import type { PeoplePayload } from "./types";
 
 /** 模板列：与「新增成员」字段对齐（中文表头便于 Excel 填写） */
@@ -23,7 +24,7 @@ export const IMPORT_COLUMNS = [
   { key: "ancestralHome", header: "住址或祖籍", required: false, sample: "" },
   { key: "address", header: "详细地址", required: false, sample: "" },
   { key: "volume", header: "祖籍/卷次", required: false, sample: "" },
-  { key: "phone", header: "联系电话", required: false, sample: "" },
+  { key: "phone", header: "联系电话", required: false, sample: "13800138000、13900139000" },
   { key: "spouse", header: "配偶姓名", required: false, sample: "" },
   { key: "spouseInfo", header: "配偶补充信息", required: false, sample: "" },
   { key: "description", header: "描述信息", required: false, sample: "" },
@@ -327,7 +328,7 @@ function parseImportTable(table: string[][]): {
       ancestralHome: get("住址或祖籍") || "",
       address: get("详细地址") || "",
       volume: get("祖籍/卷次") || "",
-      phone: get("联系电话") || "",
+      phone: formatPhones(parsePhones(get("联系电话") || "")),
       spouse: get("配偶姓名") || "",
       spouseInfo: get("配偶补充信息") || "",
       description: get("描述信息") || "",

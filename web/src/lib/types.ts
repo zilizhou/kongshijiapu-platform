@@ -89,6 +89,7 @@ export type PeoplePayload = {
   originalData?: "0" | "1";
   ancestralHome?: string;
   lngLat?: string;
+  /** 联系电话，多个用顿号「、」分隔 */
   phone?: string;
   parentId?: number | null;
   /** 终审落库时，将此人插入为该成员的父节点（并接管其原父） */

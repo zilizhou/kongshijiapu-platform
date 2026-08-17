@@ -13,6 +13,7 @@ import {
 import { FlexibleDateField } from "./FlexibleDateField";
 import { BranchPicker } from "./BranchPicker";
 import { PersonPicker } from "./PersonPicker";
+import { PhoneListField } from "./PhoneListField";
 import { RegionCascader } from "./RegionCascader";
 import { Input, Textarea } from "./ui";
 
@@ -399,11 +400,10 @@ export function PeopleForm({
         />
       </Field>
       <Field label="联系电话" {...mark("phone")}>
-        <Input
+        <PhoneListField
           disabled={disabled}
           value={value.phone || ""}
-          onChange={(e) => set("phone", e.target.value)}
-          placeholder="请输入联系电话"
+          onChange={(v) => set("phone", v)}
         />
       </Field>
 

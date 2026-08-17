@@ -1,4 +1,5 @@
 import { extractCourtesyFromDescription } from "./courtesy";
+import { formatPhones, parsePhones } from "./phone";
 import type { PeoplePayload, PeopleRow } from "./types";
 import { parseRankToIndex, rankLabelSimplified } from "./zh";
 
@@ -76,7 +77,7 @@ export function peopleToPayload(p: PeopleRow): PeoplePayload {
     originalData: p.originalData === "0" ? "0" : "1",
     ancestralHome: "",
     lngLat: p.lngLat || "",
-    phone: p.phone || "",
+    phone: formatPhones(parsePhones(p.phone || "")),
     parentId: p.parentId,
     birthFatherId: p.birthFatherId,
     birthMother: "",

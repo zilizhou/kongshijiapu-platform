@@ -866,6 +866,7 @@ export default function PeoplePage() {
                 ["谱号", drawer.no],
                 ["父名", drawer.parentName],
                 ["地址", drawer.address],
+                ["联系电话", drawer.phone],
                 ["生年", drawer.birthday],
                 ["卒年", drawer.deathday],
                 ["配偶", drawer.spouse],
