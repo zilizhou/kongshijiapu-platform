@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Input } from "./ui";
+import type { PeopleScope } from "@/lib/people-scope";
+import { personApi } from "@/lib/people-scope";
 
 interface Hit {
   id: number;
@@ -27,12 +29,14 @@ export function PersonPicker({
   onChange,
   /** 与派户支联合查询：有值时默认按该派户支缩小同名范围 */
   groupFilter,
+  scope = "people",
 }: {
   valueId: number | null | undefined;
   disabled?: boolean;
   placeholder?: string;
   onChange: (id: number | null) => void;
   groupFilter?: string;
+  scope?: PeopleScope;
 }) {
   const [keyword, setKeyword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -101,7 +105,7 @@ export function PersonPicker({
       };
     }
 
-    fetch(`/api/people/${valueId}`)
+    fetch(personApi(scope, `/${valueId}`))
       .then((r) => r.json())
       .then((d) => {
         if (cancelled || !d.person) return;
@@ -112,7 +116,7 @@ export function PersonPicker({
     return () => {
       cancelled = true;
     };
-  }, [valueId]);
+  }, [valueId, scope]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -144,7 +148,7 @@ export function PersonPicker({
       if (group) {
         sp.set("group", group);
       }
-      const res = await fetch(`/api/people?${sp}`);
+      const res = await fetch(`${personApi(scope, "")}?${sp}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "搜索失败");
       if (seq !== searchSeq.current) return;

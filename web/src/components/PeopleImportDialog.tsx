@@ -6,6 +6,7 @@ import type {
   ImportRowResult,
   PendingParentPick,
 } from "@/lib/people-import";
+import type { PeopleScope } from "@/lib/people-scope";
 
 function formatGroup(g: string | null | undefined) {
   if (!g) return "-";
@@ -32,10 +33,12 @@ export function PeopleImportDialog({
   open,
   onClose,
   onDone,
+  scope = "people",
 }: {
   open: boolean;
   onClose: () => void;
   onDone?: () => void;
+  scope?: PeopleScope;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -62,7 +65,11 @@ export function PeopleImportDialog({
   async function downloadTemplate() {
     setError("");
     try {
-      const res = await fetch("/api/people/import/template");
+      const res = await fetch(
+        scope === "daikao"
+          ? "/api/daikao/import/template"
+          : "/api/people/import/template",
+      );
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "下载失败");
@@ -71,7 +78,8 @@ export function PeopleImportDialog({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "家谱成员导入模板.xlsx";
+      a.download =
+        scope === "daikao" ? "待考成员导入模板.xlsx" : "家谱成员导入模板.xlsx";
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -112,10 +120,13 @@ export function PeopleImportDialog({
       const fd = new FormData();
       fd.set("file", file);
       fd.set("submit", submit ? "1" : "0");
-      const res = await fetch("/api/people/import", {
-        method: "POST",
-        body: fd,
-      });
+      const res = await fetch(
+        scope === "daikao" ? "/api/daikao/import" : "/api/people/import",
+        {
+          method: "POST",
+          body: fd,
+        },
+      );
       const data = await res.json();
       if (!res.ok) {
         const detail = data.parseErrors
@@ -142,18 +153,21 @@ export function PeopleImportDialog({
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/people/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          submit,
-          items: pending.map((p) => ({
-            row: p.row,
-            payload: p.payload,
-            parentId: picks[p.row],
-          })),
-        }),
-      });
+      const res = await fetch(
+        scope === "daikao" ? "/api/daikao/import" : "/api/people/import",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            submit,
+            items: pending.map((p) => ({
+              row: p.row,
+              payload: p.payload,
+              parentId: picks[p.row],
+            })),
+          }),
+        },
+      );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "确认导入失败");
 
@@ -194,9 +208,13 @@ export function PeopleImportDialog({
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
           <div>
-            <div className="font-display text-lg text-ink">批量导入成员</div>
+            <div className="font-display text-lg text-ink">
+              {scope === "daikao" ? "批量导入待考成员" : "批量导入成员"}
+            </div>
             <div className="mt-0.5 text-xs text-muted">
-              先下载 Excel 模板填写，再上传；成功后进入编修/审核流程（非直接写入正式库）
+              {scope === "daikao"
+                ? "父亲仅在待考库匹配；成功后进入待考编修/审核，终审写入待考库"
+                : "先下载 Excel 模板填写，再上传；成功后进入编修/审核流程（非直接写入正式库）"}
             </div>
           </div>
           <button

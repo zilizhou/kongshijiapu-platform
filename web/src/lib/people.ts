@@ -2524,6 +2524,7 @@ async function loadPendingCreates(
       `SELECT id, payload
        FROM app_change_requests
        WHERE operation = 'create'
+         AND object_type = 'people'
          AND status IN ('draft', 'pending_1', 'pending_2', 'pending_final')
          AND (
            CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.parentId')) AS SIGNED) IN (${placeholders})

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DaikaoBatchAdmitDialog } from "@/components/DaikaoBatchAdmitDialog";
 import { DaikaoForm, DaikaoFormValue } from "@/components/DaikaoForm";
+import { PeopleImportDialog } from "@/components/PeopleImportDialog";
+import { StructuredTextFillDialog } from "@/components/StructuredTextFillDialog";
 import { PaginationBar } from "@/components/PaginationBar";
 import {
   Button,
@@ -19,7 +21,6 @@ import {
 import type {
   DaikaoAdmitStatus,
   DaikaoRow,
-  DaikaoUpdatePayload,
   SessionUser,
 } from "@/lib/types";
 
@@ -78,29 +79,28 @@ function rowToForm(p: DaikaoRow): DaikaoFormValue {
   };
 }
 
-function formToPayload(f: DaikaoFormValue): DaikaoUpdatePayload {
-  return {
-    name: f.name.trim(),
-    spectrumNo: f.spectrumNo.trim() || null,
-    generation: f.generation.trim() ? Number(f.generation) : null,
-    generationLabel: f.generationLabel.trim() || null,
-    group1: f.group1.trim() || null,
-    group2: f.group2.trim() || null,
-    group3: f.group3.trim() || null,
-    childrenSample: f.childrenSample.trim() || null,
-    childrenWithNo: f.childrenWithNo.trim() || null,
-    outHeirs: f.outHeirs.trim() || null,
-    description: f.description,
-    sex: f.sex || "男",
-    spouse: f.spouse.trim() || null,
-    address: f.address.trim() || null,
-    volume: f.volume.trim() || null,
-    sectionPath: f.sectionPath.trim() || null,
-    parentName: f.parentName.trim() || null,
-    parentNo: f.parentNo.trim() || null,
-    isRoot: f.isRoot,
-    isOutHeir: f.isOutHeir,
-  };
+function canAdmitRow(p: DaikaoRow) {
+  if (p.admitStatus !== "none") return false;
+  if (
+    p.reviewStatus &&
+    ["pending_1", "pending_2", "pending_final"].includes(p.reviewStatus)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function daikaoEditHref(p: DaikaoRow) {
+  if (
+    p.reviewRequestId &&
+    p.reviewStatus &&
+    ["draft", "rejected", "pending_1", "pending_2", "pending_final"].includes(
+      p.reviewStatus,
+    )
+  ) {
+    return `/edit/${p.reviewRequestId}`;
+  }
+  return `/edit/new?from=${p.id}&op=update&scope=daikao`;
 }
 
 export default function DaikaoPage() {
@@ -130,22 +130,18 @@ export default function DaikaoPage() {
 
   const [detail, setDetail] = useState<DaikaoRow | null>(null);
   const [children, setChildren] = useState<DaikaoRow[]>([]);
-  const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<DaikaoFormValue | null>(null);
-  /** 进入编辑时的库内原值，用于高亮对照 */
-  const [baseline, setBaseline] = useState<DaikaoFormValue | null>(null);
-  const [saving, setSaving] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [batchOpen, setBatchOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [textImportOpen, setTextImportOpen] = useState(false);
 
   const canEdit = canEditRole(user?.role);
+  const canMutate = user?.role === "editor" || user?.role === "admin";
 
   const selectableIds = useMemo(
-    () =>
-      items
-        .filter((p) => !p.admitStatus || p.admitStatus === "none")
-        .map((p) => p.id),
+    () => items.filter((p) => canAdmitRow(p)).map((p) => p.id),
     [items],
   );
   const selectedIds = useMemo(
@@ -221,23 +217,18 @@ export default function DaikaoPage() {
     });
   }
 
-  async function openDetail(row: DaikaoRow, edit = false) {
+  async function openDetail(row: DaikaoRow) {
     setDetailLoading(true);
     setError("");
-    setEditing(false);
     setForm(null);
-    setBaseline(null);
     try {
       const res = await fetch(`/api/daikao/${row.id}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "加载失败");
-      const person = data.person as DaikaoRow;
-      const snap = rowToForm(person);
+      const person = (data.daikao || data.person) as DaikaoRow;
       setDetail(person);
       setChildren(data.children || []);
-      setForm(snap);
-      setBaseline({ ...snap });
-      setEditing(edit && canEdit);
+      setForm(rowToForm(person));
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
@@ -248,63 +239,50 @@ export default function DaikaoPage() {
   function closeDetail() {
     setDetail(null);
     setChildren([]);
-    setEditing(false);
     setForm(null);
-    setBaseline(null);
   }
 
-  function startEdit() {
-    if (!detail) return;
-    const snap = rowToForm(detail);
-    setBaseline({ ...snap });
-    setForm(snap);
-    setEditing(true);
-  }
-
-  function cancelEdit() {
-    if (!baseline) return;
-    setForm({ ...baseline });
-    setEditing(false);
-  }
-
-  async function save() {
-    if (!detail || !form) return;
-    if (!form.name.trim()) {
-      setError("姓名不能为空");
-      return;
-    }
-    setSaving(true);
-    setError("");
+  async function submitDelete(person: DaikaoRow) {
+    if (!confirm(`确认提交删除待考「${person.name}」？将进入审核流程。`)) return;
     try {
-      const res = await fetch(`/api/daikao/${detail.id}`, {
-        method: "PATCH",
+      const res = await fetch("/api/requests", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formToPayload(form)),
+        body: JSON.stringify({
+          operation: "delete",
+          objectType: "daikao",
+          objectId: person.id,
+          submit: true,
+          payload: {
+            name: person.name,
+            sex: person.sex === "女" ? "女" : "男",
+            no: person.spectrumNo,
+            level: person.generation,
+            group: person.groupRaw,
+            parentId: person.parentId,
+            description: person.description,
+            spouse: person.spouse,
+          },
+        }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "保存失败");
-      const person = data.person as DaikaoRow;
-      const snap = rowToForm(person);
-      setDetail(person);
-      setForm(snap);
-      setBaseline(snap);
-      setEditing(false);
+      if (!res.ok) throw new Error(data.error || "提交删除失败");
+      alert("已提交删除审核");
+      closeDetail();
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "保存失败");
-    } finally {
-      setSaving(false);
+      setError(e instanceof Error ? e.message : "提交删除失败");
     }
   }
 
   return (
     <div>
       <PageHeader
-        title="待考管理"
+        title="待考支管理"
         desc={
-          canEdit
-            ? "浏览与编辑待考人员；确认无误后可「申请入谱」，走三审后进入正式家谱。"
-            : "浏览待考支人员；当前账号仅可查看。"
+          canMutate
+            ? "待考支与正式家谱平行编修：新增/导入/世系图走待考三审，写入待考库；确认无误后可「申请入谱」，再走正式库三审。"
+            : "浏览待考支人员与世系；当前账号仅可查看。"
         }
       />
 
@@ -315,6 +293,25 @@ export default function DaikaoPage() {
             <Button variant="secondary" onClick={reset}>
               重置
             </Button>
+            {canMutate ? (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => setImportOpen(true)}
+                >
+                  批量导入
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setTextImportOpen(true)}
+                >
+                  粘贴文本导入
+                </Button>
+                <Link href="/edit/new?scope=daikao">
+                  <Button>新增待考成员</Button>
+                </Link>
+              </>
+            ) : null}
           </>
         }
       >
@@ -406,7 +403,7 @@ export default function DaikaoPage() {
             ) : null}
           </span>
           <div className="flex flex-wrap items-center gap-2">
-            {canEdit ? (
+            {canMutate ? (
               <Button
                 disabled={!selectedIds.length}
                 onClick={() => setBatchOpen(true)}
@@ -459,7 +456,7 @@ export default function DaikaoPage() {
                 <tr key={p.id} className="border-t border-line/70 hover:bg-soft/60">
                   {canEdit ? (
                     <td className="px-3 py-2">
-                      {!p.admitStatus || p.admitStatus === "none" ? (
+                      {canAdmitRow(p) ? (
                         <input
                           type="checkbox"
                           className="accent-accent"
@@ -513,20 +510,40 @@ export default function DaikaoPage() {
                       <button
                         type="button"
                         className="rounded bg-stone-600 px-2 py-0.5 text-xs text-white"
-                        onClick={() => openDetail(p, false)}
+                        onClick={() => openDetail(p)}
                       >
-                        查看
+                        详情
                       </button>
-                      {canEdit ? (
+                      {canMutate ? (
+                        <Link
+                          href={daikaoEditHref(p)}
+                          className="rounded bg-accent px-2 py-0.5 text-xs text-white"
+                        >
+                          {p.reviewStatus === "rejected" ? "改后重提" : "编辑"}
+                        </Link>
+                      ) : null}
+                      <Link
+                        href={`/daikao/${p.id}/lineage`}
+                        className="rounded bg-sky-700 px-2 py-0.5 text-xs text-white"
+                      >
+                        世系图
+                      </Link>
+                      <Link
+                        href={`/daikao/${p.id}/yizi`}
+                        className="rounded bg-sky-800 px-2 py-0.5 text-xs text-white"
+                      >
+                        一字图
+                      </Link>
+                      {canMutate ? (
                         <button
                           type="button"
-                          className="rounded bg-accent px-2 py-0.5 text-xs text-white"
-                          onClick={() => openDetail(p, true)}
+                          className="rounded bg-rose-700 px-2 py-0.5 text-xs text-white"
+                          onClick={() => submitDelete(p)}
                         >
-                          编辑
+                          删除
                         </button>
                       ) : null}
-                      {canEdit && (!p.admitStatus || p.admitStatus === "none") ? (
+                      {canMutate && canAdmitRow(p) ? (
                         <Link
                           href={`/edit/new?daikao=${p.id}`}
                           className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white"
@@ -539,7 +556,19 @@ export default function DaikaoPage() {
                           href={`/edit/${p.admitRequestId}`}
                           className="rounded bg-amber-700 px-2 py-0.5 text-xs text-white"
                         >
-                          变更单
+                          入谱单
+                        </Link>
+                      ) : null}
+                      {p.reviewRequestId &&
+                      p.reviewStatus &&
+                      ["draft", "pending_1", "pending_2", "pending_final", "rejected"].includes(
+                        p.reviewStatus,
+                      ) ? (
+                        <Link
+                          href={`/edit/${p.reviewRequestId}`}
+                          className="rounded bg-amber-800 px-2 py-0.5 text-xs text-white"
+                        >
+                          待考单
                         </Link>
                       ) : null}
                       {p.admitStatus === "admitted" && p.admittedPeopleId ? (
@@ -547,7 +576,7 @@ export default function DaikaoPage() {
                           href={`/people/${p.admittedPeopleId}/lineage`}
                           className="rounded bg-emerald-800 px-2 py-0.5 text-xs text-white"
                         >
-                          正式#{p.admittedPeopleId}
+                          正式世系
                         </Link>
                       ) : null}
                     </div>
@@ -633,17 +662,11 @@ export default function DaikaoPage() {
                   </Link>
                 ) : null}
               </div>
-              {editing ? (
-                <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900/80">
-                  琥珀色高亮字段为相对库中原值的修改；下方「原值」可对照。
-                </div>
-              ) : null}
-
               <DaikaoForm
                 value={form}
                 onChange={setForm}
-                disabled={!editing}
-                compareWith={editing ? baseline : null}
+                disabled
+                compareWith={null}
               />
 
               {children.length ? (
@@ -657,7 +680,7 @@ export default function DaikaoPage() {
                         key={c.id}
                         type="button"
                         className="flex w-full items-center justify-between border-b border-line/60 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-soft"
-                        onClick={() => openDetail(c, false)}
+                        onClick={() => openDetail(c)}
                       >
                         <span>
                           {c.name}
@@ -679,27 +702,24 @@ export default function DaikaoPage() {
               <Button variant="secondary" onClick={closeDetail}>
                 关闭
               </Button>
-              {canEdit &&
-              (!detail.admitStatus || detail.admitStatus === "none") &&
-              !editing ? (
+              <Link href={`/daikao/${detail.id}/lineage`}>
+                <Button variant="secondary">世系图</Button>
+              </Link>
+              <Link href={`/daikao/${detail.id}/yizi`}>
+                <Button variant="secondary">一字图</Button>
+              </Link>
+              {canMutate && canAdmitRow(detail) ? (
                 <Link href={`/edit/new?daikao=${detail.id}`}>
                   <Button variant="ok">申请入谱</Button>
                 </Link>
               ) : null}
-              {canEdit && !editing ? (
-                <Button onClick={startEdit}>编辑</Button>
-              ) : null}
-              {canEdit && editing ? (
+              {canMutate ? (
                 <>
-                  <Button
-                    variant="secondary"
-                    disabled={saving}
-                    onClick={cancelEdit}
-                  >
-                    取消
-                  </Button>
-                  <Button disabled={saving} onClick={save}>
-                    {saving ? "保存中…" : "保存"}
+                  <Link href={daikaoEditHref(detail)}>
+                    <Button>编辑</Button>
+                  </Link>
+                  <Button variant="danger" onClick={() => submitDelete(detail)}>
+                    删除
                   </Button>
                 </>
               ) : null}
@@ -716,6 +736,18 @@ export default function DaikaoPage() {
           setSelected({});
           load();
         }}
+      />
+      <PeopleImportDialog
+        open={importOpen}
+        scope="daikao"
+        onClose={() => setImportOpen(false)}
+        onDone={() => load()}
+      />
+      <StructuredTextFillDialog
+        open={textImportOpen}
+        scope="daikao"
+        onClose={() => setTextImportOpen(false)}
+        onDone={() => load()}
       />
     </div>
   );

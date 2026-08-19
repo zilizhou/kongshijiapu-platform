@@ -5,6 +5,7 @@ import { extractCourtesyFromDescription } from "@/lib/courtesy";
 import { formatBeforeValue, isFieldChanged } from "@/lib/diff";
 import { PeoplePayload } from "@/lib/types";
 import { nameToPinyin } from "@/lib/pinyin";
+import type { PeopleScope } from "@/lib/people-scope";
 import {
   parseRankGender,
   parseRankToIndex,
@@ -108,12 +109,15 @@ export function PeopleForm({
   onChange,
   disabled,
   compareWith,
+  scope = "people",
 }: {
   value: PeoplePayload;
   onChange: (v: PeoplePayload) => void;
   disabled?: boolean;
   /** 修改前快照；有则高亮变更字段并展示原值 */
   compareWith?: PeoplePayload | null;
+  /** 待考支表单：选人/派户支只搜待考库 */
+  scope?: PeopleScope;
 }) {
   const lastAutoPinyin = useRef("");
   const set = <K extends keyof PeoplePayload>(key: K, v: PeoplePayload[K]) =>
@@ -192,7 +196,13 @@ export function PeopleForm({
           disabled={disabled}
           value={value.group || ""}
           onChange={(group) => set("group", group)}
-          placeholder="输入名称搜索派户支"
+          placeholder={
+            scope === "daikao"
+              ? "输入已有待考派户支或直接填写"
+              : "输入名称搜索派户支"
+          }
+          scope={scope}
+          allowFuzzyText={scope === "daikao"}
         />
       </Field>
       <Field label="当前父" required {...mark("parentId")}>
@@ -200,8 +210,13 @@ export function PeopleForm({
           disabled={disabled}
           valueId={value.parentId}
           groupFilter={value.group || ""}
-          placeholder="输入姓名搜索当前父"
+          placeholder={
+            scope === "daikao"
+              ? "输入姓名搜索待考库当前父"
+              : "输入姓名搜索当前父"
+          }
           onChange={(id) => set("parentId", id)}
+          scope={scope}
         />
       </Field>
 
@@ -462,8 +477,13 @@ export function PeopleForm({
           disabled={disabled}
           valueId={value.birthFatherId}
           groupFilter={value.group || ""}
-          placeholder="输入姓名搜索原生父"
+          placeholder={
+            scope === "daikao"
+              ? "输入姓名搜索待考库原生父"
+              : "输入姓名搜索原生父"
+          }
           onChange={(id) => set("birthFatherId", id)}
+          scope={scope}
         />
       </Field>
       <Field label="原生母姓名" {...mark("birthMother")}>

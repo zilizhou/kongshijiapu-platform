@@ -8,6 +8,11 @@ import { PeopleListBackLink } from "@/components/PeopleListBackLink";
 import { Button, Card } from "@/components/ui";
 import { normalizePeopleRank, peopleToPayload } from "@/lib/people-client";
 import { PeoplePayload, PeopleRow } from "@/lib/types";
+import {
+  objectTypeOf,
+  personApi,
+  type PeopleScope,
+} from "@/lib/people-scope";
 
 function rowToPayload(p: PeopleRow): PeoplePayload {
   return { ...emptyPayload(), ...peopleToPayload(p) };
@@ -18,6 +23,8 @@ function NewEditInner() {
   const sp = useSearchParams();
   const fromId = sp.get("from");
   const daikaoId = sp.get("daikao");
+  const scope: PeopleScope = sp.get("scope") === "daikao" ? "daikao" : "people";
+  const isDaikaoEdit = scope === "daikao" && !daikaoId;
   const op = (sp.get("op") || "create") as "create" | "update";
   const [payload, setPayload] = useState<PeoplePayload>(emptyPayload());
   const [objectId, setObjectId] = useState<number | null>(null);
@@ -68,7 +75,7 @@ function NewEditInner() {
     }
     if (!fromId) return;
     setLoading(true);
-    fetch(`/api/people/${fromId}`)
+    fetch(personApi(isDaikaoEdit ? "daikao" : "people", `/${fromId}`))
       .then((r) => r.json())
       .then((d) => {
         if (!d.person) return;
@@ -99,7 +106,7 @@ function NewEditInner() {
         }
       })
       .finally(() => setLoading(false));
-  }, [fromId, op, daikaoId, router]);
+  }, [fromId, op, daikaoId, router, isDaikaoEdit]);
 
   async function save(submit: boolean) {
     if (!payload.name.trim()) {
@@ -118,6 +125,7 @@ function NewEditInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operation: op === "update" ? "update" : "create",
+          objectType: isDaikaoEdit ? objectTypeOf("daikao") : "people",
           objectId: op === "update" ? objectId : null,
           payload: normalizePeopleRank(payload),
           submit,
@@ -151,10 +159,14 @@ function NewEditInner() {
   const isAdmit = Boolean(daikaoId);
   const title =
     op === "update"
-      ? "编辑成员信息"
+      ? isDaikaoEdit
+        ? "编辑待考成员"
+        : "编辑成员信息"
       : isAdmit
         ? "待考申请入谱"
-        : "新增家谱成员";
+        : isDaikaoEdit
+          ? "新增待考成员"
+          : "新增家谱成员";
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -164,11 +176,15 @@ function NewEditInner() {
             <h1 className="font-display text-xl text-ink">{title}</h1>
             {isAdmit ? (
               <p className="mt-1 text-xs text-muted">
-                来源待考 #{daikaoId} · 提交后走一/二/终审，通过后写入正式家谱
+                来源待考 #{daikaoId} · 提交后走正式库一/二/终审，通过后写入正式家谱
+              </p>
+            ) : isDaikaoEdit ? (
+              <p className="mt-1 text-xs text-muted">
+                待考支编修 · 终审通过后写入待考库（入谱需另走正式库三审）
               </p>
             ) : null}
           </div>
-          {isAdmit ? (
+          {isAdmit || isDaikaoEdit ? (
             <Link
               href="/daikao"
               className="text-xl leading-none text-muted hover:text-ink"
@@ -228,7 +244,11 @@ function NewEditInner() {
                   </div>
                 </div>
               ) : null}
-              <PeopleForm value={payload} onChange={setPayload} />
+              <PeopleForm
+                value={payload}
+                onChange={setPayload}
+                scope={isAdmit ? "people" : isDaikaoEdit ? "daikao" : "people"}
+              />
             </>
           )}
         </div>
@@ -238,7 +258,7 @@ function NewEditInner() {
             <p className="mb-3 text-sm text-danger">{error}</p>
           ) : null}
           <div className="flex flex-wrap justify-end gap-2">
-            {isAdmit ? (
+            {isAdmit || isDaikaoEdit ? (
               <Link href="/daikao">
                 <Button type="button" variant="secondary" disabled={saving}>
                   取消

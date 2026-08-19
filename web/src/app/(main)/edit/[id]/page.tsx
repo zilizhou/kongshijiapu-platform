@@ -135,7 +135,7 @@ export default function EditDetailPage() {
       );
       return;
     }
-    if (item.objectType === "people") {
+    if (item.objectType === "people" || item.objectType === "daikao") {
       const p = payload as PeoplePayload;
       if (!p.group?.trim()) {
         setError("请填写所属派户支");
@@ -146,7 +146,7 @@ export default function EditDetailPage() {
     setError("");
     try {
       const body =
-        item.objectType === "people"
+        item.objectType === "people" || item.objectType === "daikao"
           ? normalizePeopleRank(payload as PeoplePayload)
           : payload;
       // 用 POST：避免部分环境拦截 PATCH 导致 Failed to fetch
@@ -196,7 +196,8 @@ export default function EditDetailPage() {
         </Card>
       ) : null}
 
-      {(payload as PeoplePayload).sourceDaikaoId ? (
+      {item.objectType === "people" &&
+      (payload as PeoplePayload).sourceDaikaoId ? (
         <Card className="mb-4 border-sky-200 bg-sky-50/70 p-4 text-sm text-sky-950">
           来源：待考成员 #
           {(payload as PeoplePayload).sourceDaikaoId}
@@ -250,6 +251,7 @@ export default function EditDetailPage() {
               onChange={setPayload}
               disabled={!editable || item.operation === "delete"}
               compareWith={item.beforeSnapshot as PeoplePayload | null}
+              scope={item.objectType === "daikao" ? "daikao" : "people"}
             />
           )}
           <div className="mt-8 border-t border-line pt-4">

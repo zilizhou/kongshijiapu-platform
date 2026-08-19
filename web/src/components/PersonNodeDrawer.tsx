@@ -9,6 +9,8 @@ import {
   resolvePeopleDataSource,
 } from "@/lib/people-source";
 import { PeoplePayload, PeopleRow } from "@/lib/types";
+import type { PeopleScope } from "@/lib/people-scope";
+import { objectTypeOf, personApi } from "@/lib/people-scope";
 import { PeopleForm } from "./PeopleForm";
 import { Button, DataSourcePill } from "./ui";
 
@@ -32,6 +34,7 @@ export function PersonNodeDrawer({
   focusHref,
   onClose,
   onSaved,
+  scope = "people",
 }: {
   personId: number;
   canEdit: boolean;
@@ -39,6 +42,7 @@ export function PersonNodeDrawer({
   focusHref: string;
   onClose: () => void;
   onSaved?: () => void;
+  scope?: PeopleScope;
 }) {
   const [person, setPerson] = useState<PeopleRow | null>(null);
   const [payload, setPayload] = useState<PeoplePayload | null>(null);
@@ -66,7 +70,7 @@ export function PersonNodeDrawer({
     setPerson(null);
     setPayload(null);
     setBaseline(null);
-    fetch(`/api/people/${personId}`)
+    fetch(personApi(scope, `/${personId}`))
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
@@ -89,7 +93,7 @@ export function PersonNodeDrawer({
     return () => {
       cancelled = true;
     };
-  }, [personId]);
+  }, [personId, scope]);
 
   async function submit(asSubmit: boolean) {
     if (!payload || !person) return;
@@ -129,6 +133,7 @@ export function PersonNodeDrawer({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               operation: "update",
+              objectType: objectTypeOf(scope),
               objectId: person.id,
               payload: body,
               submit: asSubmit,
@@ -196,9 +201,11 @@ export function PersonNodeDrawer({
             <div className="space-y-3 py-6 text-center">
               <p className="text-ink">已创建变更单 #{savedId}</p>
               <p className="text-sm text-muted">
-                {editing || payload
-                  ? "终审通过后写入正式家谱。"
-                  : "终审通过后生效。"}
+                {scope === "daikao"
+                  ? "终审通过后写入待考库。"
+                  : editing || payload
+                    ? "终审通过后写入正式家谱。"
+                    : "终审通过后生效。"}
               </p>
               <Link href={`/edit/${savedId}`}>
                 <Button>查看编修单</Button>
@@ -209,6 +216,7 @@ export function PersonNodeDrawer({
               value={payload}
               onChange={setPayload}
               compareWith={baseline}
+              scope={scope}
             />
           ) : person ? (
             <dl className="space-y-3 text-sm">

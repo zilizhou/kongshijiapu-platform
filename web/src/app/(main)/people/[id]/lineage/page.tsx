@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   AddRelation,
@@ -14,6 +14,13 @@ import { PersonNodeDrawer } from "@/components/PersonNodeDrawer";
 import { PeopleListBackLink } from "@/components/PeopleListBackLink";
 import { Button, Card, PageHeader } from "@/components/ui";
 import type { LineageNode, PeopleRow, SessionUser } from "@/lib/types";
+import {
+  objectTypeOf,
+  personApi,
+  personListHref,
+  personPage,
+  type PeopleScope,
+} from "@/lib/people-scope";
 
 type Payload = {
   focus: PeopleRow;
@@ -388,6 +395,8 @@ function lineageContainsId(node: LineageNode, id: number): boolean {
 
 function LineageInner() {
   const params = useParams<{ id: string }>();
+  const pathname = usePathname();
+  const scope: PeopleScope = pathname.includes("/daikao/") ? "daikao" : "people";
   const router = useRouter();
   const search = useSearchParams();
   const initUp = Math.min(10, Math.max(0, Number(search.get("up") || 1)));
@@ -437,7 +446,9 @@ function LineageInner() {
         up: String(queryUp),
         down: String(queryDown),
       });
-      const res = await fetch(`/api/people/${params.id}/lineage?${sp}`);
+      const res = await fetch(
+        `${personApi(scope, `/${params.id}/lineage`)}?${sp}`,
+      );
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "加载失败");
       setData(d);
@@ -452,7 +463,7 @@ function LineageInner() {
     } finally {
       setLoading(false);
     }
-  }, [params.id, queryUp, queryDown]);
+  }, [params.id, queryUp, queryDown, scope]);
 
   useEffect(() => {
     load();
@@ -563,6 +574,7 @@ function LineageInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operation: "reorder",
+          objectType: objectTypeOf(scope),
           objectId: pendingReorder.parentId,
           payload: { name: "排行調整", childIds: pendingReorder.childIds },
           submit: true,
@@ -583,7 +595,7 @@ function LineageInner() {
   return (
     <div>
       <PageHeader
-        title="世系图"
+        title={scope === "daikao" ? "待考世系图" : "世系图"}
         desc={
           data
             ? `以「${data.focus.name}」为中心，上溯 ${data.up} 代、下延 ${data.down} 代（含各代兄弟分支）`
@@ -591,10 +603,10 @@ function LineageInner() {
         }
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link href={`/people/${params.id}/yizi`}>
+            <Link href={personPage(scope, Number(params.id), "yizi")}>
               <Button variant="secondary">一字图</Button>
             </Link>
-            <PeopleListBackLink>
+            <PeopleListBackLink listHref={personListHref(scope)}>
               <Button variant="ghost">返回列表</Button>
             </PeopleListBackLink>
           </div>
@@ -777,6 +789,7 @@ function LineageInner() {
           anchorId={addDlg.id}
           anchorName={addDlg.name}
           anchorSeed={addDlg.seed}
+          scope={scope}
           onClose={() => setAddDlg(null)}
           onSaved={() => load()}
         />
@@ -786,7 +799,8 @@ function LineageInner() {
         <PersonNodeDrawer
           personId={drawerId}
           canEdit={canEdit}
-          focusHref={`/people/${drawerId}/lineage${depthQs}`}
+          scope={scope}
+          focusHref={`${personPage(scope, drawerId, "lineage")}${depthQs}`}
           onClose={() => setDrawerId(null)}
           onSaved={() => load()}
         />

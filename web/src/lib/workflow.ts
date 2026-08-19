@@ -9,8 +9,14 @@ import {
 import { formatDateTime } from "./datetime";
 import { execute, query, withTransaction } from "./db";
 import {
+  applyDaikaoCreate,
+  applyDaikaoDelete,
+  applyDaikaoReorder,
+  applyDaikaoUpdate,
   assertDaikaoAdmittable,
   clearDaikaoAdmitPending,
+  daikaoToPeoplePayload,
+  getDaikaoById,
   getSourceDaikaoId,
   markDaikaoAdmitPending,
 } from "./daikao";
@@ -165,23 +171,28 @@ function mapRequest(r: RequestDb): ChangeRequest {
   };
 }
 
-let branchEnumReady: Promise<void> | null = null;
+let objectTypeEnumReady: Promise<void> | null = null;
 
-/** 确保 object_type 支持 branch（兼容旧库） */
-export async function ensureBranchObjectType() {
-  if (!branchEnumReady) {
-    branchEnumReady = (async () => {
+/** 确保 object_type 支持 people / branch / daikao（兼容旧库） */
+export async function ensureChangeObjectType() {
+  if (!objectTypeEnumReady) {
+    objectTypeEnumReady = (async () => {
       try {
         await execute(
           `ALTER TABLE app_change_requests
-           MODIFY object_type ENUM('people','branch') NOT NULL DEFAULT 'people'`,
+           MODIFY object_type ENUM('people','branch','daikao') NOT NULL DEFAULT 'people'`,
         );
       } catch {
         /* 已是目标定义或无权限时忽略 */
       }
     })();
   }
-  await branchEnumReady;
+  await objectTypeEnumReady;
+}
+
+/** @deprecated 使用 ensureChangeObjectType */
+export async function ensureBranchObjectType() {
+  await ensureChangeObjectType();
 }
 
 function normalizePayload(
@@ -231,7 +242,9 @@ export async function createRequest(opts: {
   }
 
   const objectType: ObjectType = opts.objectType || "people";
-  if (objectType === "branch") await ensureBranchObjectType();
+  if (objectType === "branch" || objectType === "daikao") {
+    await ensureChangeObjectType();
+  }
   if (objectType === "branch" && opts.operation === "reorder") {
     throw new Error("派户支不支持排行调整");
   }
@@ -251,12 +264,21 @@ export async function createRequest(opts: {
   };
 
   let before: ChangePayload | null = null;
-  if (objectType === "people" && opts.operation === "reorder") {
+  if (
+    (objectType === "people" || objectType === "daikao") &&
+    opts.operation === "reorder"
+  ) {
     if (!opts.objectId) throw new Error("缺少父节点 ID");
     if (!payload.childIds?.length) throw new Error("缺少子节点顺序");
-    const parent = await getPeopleById(opts.objectId);
-    if (!parent) throw new Error("父节点不存在");
-    before = peopleToPayload(parent);
+    if (objectType === "daikao") {
+      const parent = await getDaikaoById(opts.objectId);
+      if (!parent) throw new Error("待考父节点不存在");
+      before = daikaoToPeoplePayload(parent);
+    } else {
+      const parent = await getPeopleById(opts.objectId);
+      if (!parent) throw new Error("父节点不存在");
+      before = peopleToPayload(parent);
+    }
     payload.name = payload.name || "排行調整";
   } else if (opts.operation !== "create") {
     if (!opts.objectId) {
@@ -266,6 +288,10 @@ export async function createRequest(opts: {
       const branch = await getBranchById(opts.objectId);
       if (!branch) throw new Error("派户支不存在");
       before = branchToPayload(branch);
+    } else if (objectType === "daikao") {
+      const person = await getDaikaoById(opts.objectId);
+      if (!person) throw new Error("待考成员不存在");
+      before = daikaoToPeoplePayload(person);
     } else {
       const person = await getPeopleById(opts.objectId);
       if (!person) throw new Error("成员不存在");
@@ -422,12 +448,15 @@ async function findOpenRequestsToMerge(opts: {
     );
   }
 
-  if (opts.objectType !== "people" || opts.operation !== "create") {
+  if (
+    (opts.objectType !== "people" && opts.objectType !== "daikao") ||
+    opts.operation !== "create"
+  ) {
     return [];
   }
 
   const sourceDaikaoId = getSourceDaikaoId(opts.payload);
-  if (sourceDaikaoId) {
+  if (opts.objectType === "people" && sourceDaikaoId) {
     return query<RowDataPacket[]>(
       `SELECT id, status FROM app_change_requests
        WHERE object_type = 'people'
@@ -447,7 +476,7 @@ async function findOpenRequestsToMerge(opts: {
   if (parentId > 0) {
     return query<RowDataPacket[]>(
       `SELECT id, status FROM app_change_requests
-       WHERE object_type = 'people'
+       WHERE object_type = :objectType
          AND operation = 'create'
          AND submitter_id = :userId
          AND status IN ('draft', 'rejected')
@@ -455,12 +484,12 @@ async function findOpenRequestsToMerge(opts: {
          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.parentId')) AS UNSIGNED) = :parentId
        ORDER BY id DESC
        LIMIT 5`,
-      { userId: opts.userId, name, parentId },
+      { objectType: opts.objectType, userId: opts.userId, name, parentId },
     );
   }
   return query<RowDataPacket[]>(
     `SELECT id, status FROM app_change_requests
-     WHERE object_type = 'people'
+     WHERE object_type = :objectType
        AND operation = 'create'
        AND submitter_id = :userId
        AND status IN ('draft', 'rejected')
@@ -471,7 +500,7 @@ async function findOpenRequestsToMerge(opts: {
        )
      ORDER BY id DESC
      LIMIT 5`,
-    { userId: opts.userId, name },
+    { objectType: opts.objectType, userId: opts.userId, name },
   );
 }
 
@@ -636,6 +665,55 @@ export async function approveRequest(
         throw new Error("派户支不支持该操作");
       }
       await addEvent(id, user, "approve_final");
+      return getRequestById(id);
+    }
+
+    if (req.objectType === "daikao") {
+      await withTransaction(async (conn) => {
+        let peoplePayload = req.payload as PeoplePayload;
+        if (req.operation === "create") {
+          peoplePayload = await resolvePendingCreateRefs(peoplePayload);
+          const newId = await applyDaikaoCreate(conn, peoplePayload);
+          await conn.execute(
+            `UPDATE app_change_requests SET status='approved', object_id=?, approved_at=NOW(),
+             last_actor_id=?, last_actor_name=? WHERE id=?`,
+            [newId, user.id, user.displayName, id],
+          );
+        } else if (req.operation === "update") {
+          if (!req.objectId) throw new Error("缺少待考成员 ID");
+          await applyDaikaoUpdate(conn, req.objectId, peoplePayload);
+          await conn.execute(
+            `UPDATE app_change_requests SET status='approved', approved_at=NOW(),
+             last_actor_id=?, last_actor_name=? WHERE id=?`,
+            [user.id, user.displayName, id],
+          );
+        } else if (req.operation === "delete") {
+          if (!req.objectId) throw new Error("缺少待考成员 ID");
+          await applyDaikaoDelete(conn, req.objectId);
+          await conn.execute(
+            `UPDATE app_change_requests SET status='approved', approved_at=NOW(),
+             last_actor_id=?, last_actor_name=? WHERE id=?`,
+            [user.id, user.displayName, id],
+          );
+        } else if (req.operation === "reorder") {
+          if (!req.objectId) throw new Error("缺少待考父节点 ID");
+          const childIds = peoplePayload.childIds || [];
+          await applyDaikaoReorder(conn, req.objectId, childIds);
+          await conn.execute(
+            `UPDATE app_change_requests SET status='approved', approved_at=NOW(),
+             last_actor_id=?, last_actor_name=? WHERE id=?`,
+            [user.id, user.displayName, id],
+          );
+        } else {
+          throw new Error("待考成员不支持该操作");
+        }
+        await conn.execute(
+          `INSERT INTO app_change_events
+            (request_id, actor_id, actor_name, actor_role, action, note)
+           VALUES (?, ?, ?, ?, 'approve_final', NULL)`,
+          [id, user.id, user.displayName, user.role],
+        );
+      });
       return getRequestById(id);
     }
 
@@ -819,7 +897,10 @@ export async function getRequestById(id: number) {
   );
   if (!rows[0]) return null;
   const item = mapRequest(rows[0]);
-  if (item.objectType === "people" && item.payload) {
+  if (
+    (item.objectType === "people" || item.objectType === "daikao") &&
+    item.payload
+  ) {
     item.payload = await hydratePeoplePayloadForView(
       item.payload as PeoplePayload,
     );

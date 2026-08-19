@@ -199,7 +199,8 @@ export default function ReviewDetailPage() {
         actions={<StatusPill status={item.status} />}
       />
 
-      {(payload as PeoplePayload).sourceDaikaoId ? (
+      {item.objectType === "people" &&
+      (payload as PeoplePayload).sourceDaikaoId ? (
         <Card className="mb-4 border-sky-200 bg-sky-50/70 p-4 text-sm text-sky-950">
           来源：待考成员 #
           {(payload as PeoplePayload).sourceDaikaoId}
@@ -246,6 +247,7 @@ export default function ReviewDetailPage() {
             }}
             disabled={item.operation === "delete"}
             compareWith={compareWith as PeoplePayload | null}
+            scope={item.objectType === "daikao" ? "daikao" : "people"}
           />
         )}
       </Card>

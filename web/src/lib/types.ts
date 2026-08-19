@@ -10,8 +10,8 @@ export type RequestStatus =
 
 export type Operation = "create" | "update" | "delete" | "reorder";
 
-/** 变更对象：家谱成员 / 派户支 */
-export type ObjectType = "people" | "branch";
+/** 变更对象：家谱成员 / 派户支 / 待考成员 */
+export type ObjectType = "people" | "branch" | "daikao";
 
 export type SessionUser = {
   id: string;
@@ -151,6 +151,10 @@ export type PeopleRow = {
   professionalTitle: string | null;
   college: string | null;
   degree: string | null;
+  nation?: string | null;
+  ancestralHome?: string | null;
+  birthMother?: string | null;
+  currentMother?: string | null;
   /** 录入时间 */
   createTime: string | null;
   /** 创建人账号标记；platform=本平台新录，空=旧谱底库 */
@@ -206,6 +210,7 @@ export const OP_LABEL: Record<Operation, string> = {
 export const OBJECT_TYPE_LABEL: Record<ObjectType, string> = {
   people: "家谱成员",
   branch: "派户支",
+  daikao: "待考成员",
 };
 
 /** 待考入谱状态 */
@@ -243,6 +248,29 @@ export type DaikaoRow = {
   admitRequestId: number | null;
   admittedPeopleId: number | null;
   admittedAt: string | null;
+  pinyin?: string | null;
+  alias?: string | null;
+  zi?: string | null;
+  hao?: string | null;
+  birthday?: string | null;
+  deathday?: string | null;
+  phone?: string | null;
+  nation?: string | null;
+  ancestralHome?: string | null;
+  lngLat?: string | null;
+  spouseInfo?: string | null;
+  company?: string | null;
+  position?: string | null;
+  professionalTitle?: string | null;
+  college?: string | null;
+  degree?: string | null;
+  birthFatherId?: number | null;
+  birthMother?: string | null;
+  currentMother?: string | null;
+  rank?: string | null;
+  siblingOrder?: number | null;
+  reviewStatus?: string | null;
+  reviewRequestId?: number | null;
 };
 
 export type DaikaoUpdatePayload = {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Input } from "./ui";
+import type { PeopleScope } from "@/lib/people-scope";
 
 type Hit = {
   id: number;
@@ -16,12 +17,14 @@ export function BranchPicker({
   onChange,
   /** 允许把输入词直接作为模糊条件（如只知「某戶」不知支） */
   allowFuzzyText = false,
+  scope = "people",
 }: {
   value: string;
   disabled?: boolean;
   placeholder?: string;
   onChange: (group: string) => void;
   allowFuzzyText?: boolean;
+  scope?: PeopleScope;
 }) {
   const [keyword, setKeyword] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
@@ -53,7 +56,11 @@ export function BranchPicker({
           pageSize: "20",
         });
         if (q.trim()) sp.set("q", q.trim());
-        const res = await fetch(`/api/branches?${sp}`);
+        const url =
+          scope === "daikao"
+            ? `/api/daikao/groups?${sp}`
+            : `/api/branches?${sp}`;
+        const res = await fetch(url);
         const data = await res.json();
         setHits((data.items || []) as Hit[]);
         setOpen(true);

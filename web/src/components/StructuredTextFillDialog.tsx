@@ -10,6 +10,8 @@ import {
   type ParsedPerson,
 } from "@/lib/structured-people-text";
 import type { PeoplePayload } from "@/lib/types";
+import type { PeopleScope } from "@/lib/people-scope";
+import { objectTypeOf } from "@/lib/people-scope";
 import { Button, Textarea } from "./ui";
 
 type CreatedInfo = {
@@ -31,10 +33,12 @@ export function StructuredTextFillDialog({
   open,
   onClose,
   onDone,
+  scope = "people",
 }: {
   open: boolean;
   onClose: () => void;
   onDone?: () => void;
+  scope?: PeopleScope;
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
@@ -119,6 +123,7 @@ export function StructuredTextFillDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operation: "create",
+          objectType: objectTypeOf(scope),
           objectId: null,
           payload,
           submit,
@@ -145,9 +150,13 @@ export function StructuredTextFillDialog({
       <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
         <div className="flex items-start justify-between border-b border-line px-5 py-4">
           <div>
-            <h2 className="text-base font-semibold">粘贴文本导入</h2>
+            <h2 className="text-base font-semibold">
+              {scope === "daikao" ? "粘贴文本导入待考成员" : "粘贴文本导入"}
+            </h2>
             <p className="mt-1 text-xs text-muted">
-              解析后点选成员，在右侧表单核对/修改后新增，生成编修变更单（走一/二/终审）。
+              {scope === "daikao"
+                ? "解析后点选成员，父亲在待考库匹配；生成待考编修变更单（走一/二/终审后写入待考库）。"
+                : "解析后点选成员，在右侧表单核对/修改后新增，生成编修变更单（走一/二/终审）。"}
             </p>
           </div>
           <button
@@ -259,6 +268,7 @@ export function StructuredTextFillDialog({
                       <PeopleForm
                         value={draft}
                         disabled={Boolean(createdInfo)}
+                        scope={scope}
                         onChange={(next) => {
                           if (!preview) return;
                           setDrafts((prev) => ({

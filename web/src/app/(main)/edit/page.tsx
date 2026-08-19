@@ -54,7 +54,7 @@ export default function EditListPage() {
     <div>
       <PageHeader
         title="我的编修"
-        desc="家谱成员与派户支的变更单。待审可撤回；未通过的编修单可自行删除。"
+        desc="家谱成员、待考成员与派户支的变更单。待审可撤回；未通过的编修单可自行删除。"
         actions={
           <Link href="/edit/new">
             <Button>新增成员</Button>

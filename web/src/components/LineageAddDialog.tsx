@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
 import { Button } from "@/components/ui";
 import { normalizePeopleRank } from "@/lib/people-client";
+import type { PeopleScope } from "@/lib/people-scope";
+import { objectTypeOf, personApi } from "@/lib/people-scope";
 import { PeoplePayload, PeopleRow } from "@/lib/types";
 
 export type AddRelation = "parent" | "sibling" | "child";
@@ -95,6 +97,7 @@ export function LineageAddDialog({
   anchorSeed,
   onClose,
   onSaved,
+  scope = "people",
 }: {
   relation: AddRelation;
   anchorId: number;
@@ -103,6 +106,7 @@ export function LineageAddDialog({
   anchorSeed?: AnchorSeed | null;
   onClose: () => void;
   onSaved: () => void;
+  scope?: PeopleScope;
 }) {
   const [payload, setPayload] = useState<PeoplePayload>(emptyPayload());
   const [ready, setReady] = useState(false);
@@ -157,7 +161,7 @@ export function LineageAddDialog({
 
     (async () => {
       try {
-        const res = await fetch(`/api/people/${anchorId}`, {
+        const res = await fetch(personApi(scope, `/${anchorId}`), {
           signal: ctrl.signal,
         });
         const d = await res.json().catch(() => ({}));
@@ -190,7 +194,7 @@ export function LineageAddDialog({
       ctrl.abort();
       window.clearTimeout(timer);
     };
-  }, [anchorId, relation, reloadKey, applySeedFallback]);
+  }, [anchorId, relation, reloadKey, applySeedFallback, scope]);
 
   async function save(asSubmit: boolean) {
     if (!payload.name?.trim()) {
@@ -213,6 +217,7 @@ export function LineageAddDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           operation: "create",
+          objectType: objectTypeOf(scope),
           objectId: null,
           payload: normalizePeopleRank(payload),
           submit: asSubmit,
@@ -275,7 +280,7 @@ export function LineageAddDialog({
               </Link>
             </div>
           ) : ready ? (
-            <PeopleForm value={payload} onChange={setPayload} />
+            <PeopleForm value={payload} onChange={setPayload} scope={scope} />
           ) : (
             <div className="space-y-3 py-10 text-center">
               <div className="text-muted">准备表单...</div>
