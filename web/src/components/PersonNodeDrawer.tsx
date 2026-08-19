@@ -28,6 +28,20 @@ function formatGroup(g: string | null | undefined) {
   return parts.reverse().join("/");
 }
 
+/** 住址或祖籍 + 详细地址拼成完整地址，避免只显示街道一段 */
+function formatFullAddress(person: PeopleRow) {
+  const home = (person.ancestralHome || "").trim();
+  const addr = (person.address || "").trim();
+  if (home && addr) {
+    const homeFlat = home.replace(/\s*\/\s*/g, "");
+    if (addr.includes(home) || addr.includes(homeFlat) || home.includes(addr)) {
+      return addr.length >= home.length ? addr : home;
+    }
+    return `${home} ${addr}`;
+  }
+  return addr || home;
+}
+
 export function PersonNodeDrawer({
   personId,
   canEdit,
@@ -229,11 +243,17 @@ export function PersonNodeDrawer({
                   ["别名", person.alias],
                   ["排行", person.rank],
                   ["父名", person.parentName],
-                  ["地址", person.address],
+                  ["地址", formatFullAddress(person)],
+                  ["联系电话", person.phone],
                   ["生年", person.birthday],
                   ["卒年", person.deathday],
                   ["配偶", person.spouse],
                   ["配偶信息", person.spouseInfo],
+                  ["工作单位", person.company],
+                  ["职位", person.position],
+                  ["职称", person.professionalTitle],
+                  ["学历", person.degree],
+                  ["毕业学校", person.college],
                   ["卷次", person.volume],
                   ["小传", person.description],
                   [
@@ -246,7 +266,7 @@ export function PersonNodeDrawer({
               ).map(([k, v]) => (
                 <div key={k}>
                   <dt className="text-xs text-muted">{k}</dt>
-                  <dd className="mt-0.5 whitespace-pre-wrap text-ink">
+                  <dd className="mt-0.5 break-all whitespace-pre-wrap text-ink">
                     {dash(v)}
                   </dd>
                 </div>
