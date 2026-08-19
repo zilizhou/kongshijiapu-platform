@@ -183,7 +183,7 @@ export default function DashboardPage() {
               <Button variant="secondary">家谱管理</Button>
             </Link>
             <Link href="/daikao">
-              <Button variant="secondary">待考管理</Button>
+              <Button variant="secondary">待考支管理</Button>
             </Link>
             {canEdit ? (
               <Link href="/edit">

@@ -12,7 +12,7 @@ const navFor = (role: string): NavItem[] => {
   const items: NavItem[] = [
     { href: "/dashboard", label: "首页" },
     { href: "/people", label: "家谱管理", match: "/people" },
-    { href: "/daikao", label: "待考支", match: "/daikao" },
+    { href: "/daikao", label: "待考支管理", match: "/daikao" },
     { href: "/branches", label: "派户支管理", match: "/branches" },
   ];
   if (role === "editor" || role === "admin") {

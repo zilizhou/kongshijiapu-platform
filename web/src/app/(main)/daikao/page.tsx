@@ -293,25 +293,6 @@ export default function DaikaoPage() {
             <Button variant="secondary" onClick={reset}>
               重置
             </Button>
-            {canMutate ? (
-              <>
-                <Button
-                  variant="secondary"
-                  onClick={() => setImportOpen(true)}
-                >
-                  批量导入
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => setTextImportOpen(true)}
-                >
-                  粘贴文本导入
-                </Button>
-                <Link href="/edit/new?scope=daikao">
-                  <Button>新增待考成员</Button>
-                </Link>
-              </>
-            ) : null}
           </>
         }
       >
@@ -404,12 +385,29 @@ export default function DaikaoPage() {
           </span>
           <div className="flex flex-wrap items-center gap-2">
             {canMutate ? (
-              <Button
-                disabled={!selectedIds.length}
-                onClick={() => setBatchOpen(true)}
-              >
-                批量申请入谱
-              </Button>
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => setImportOpen(true)}
+                >
+                  批量导入
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setTextImportOpen(true)}
+                >
+                  粘贴文本导入
+                </Button>
+                <Link href="/edit/new?scope=daikao">
+                  <Button>新增待考成员</Button>
+                </Link>
+                <Button
+                  disabled={!selectedIds.length}
+                  onClick={() => setBatchOpen(true)}
+                >
+                  批量申请入谱
+                </Button>
+              </>
             ) : null}
           </div>
         </div>
