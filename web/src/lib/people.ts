@@ -29,6 +29,7 @@ type PeopleDb = RowDataPacket & {
   F_BIRTHDAY: string | null;
   F_DEATHDAY: string | null;
   F_ADDRESS: string | null;
+  F_ANCESTRAL_HOME?: string | null;
   F_PINYIN: string | null;
   F_ALIAS: string | null;
   F_IS_HEIR: string | null;
@@ -67,6 +68,7 @@ function mapRow(r: PeopleDb): PeopleRow {
     birthday: r.F_BIRTHDAY,
     deathday: r.F_DEATHDAY,
     address: r.F_ADDRESS,
+    ancestralHome: r.F_ANCESTRAL_HOME ?? null,
     pinyin: r.F_PINYIN,
     alias: r.F_ALIAS ?? null,
     zi: null,
@@ -807,6 +809,95 @@ export async function ensureCourtesyTable() {
 }
 
 let phoneColumnReady = false;
+let ancestralHomeColumnReady = false;
+let ancestralHomeBackfilled = false;
+
+function trimAncestralHome(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!s || s === "null") return null;
+  return s;
+}
+
+/** 从变更单 payload 取住址或祖籍（终审漏写列时的回退） */
+export async function loadAncestralHomeFromRequest(
+  objectType: string,
+  objectId: number,
+): Promise<string | null> {
+  if (!objectId || !(await tableExists("app_change_requests"))) return null;
+  try {
+    const rows = await query<RowDataPacket[]>(
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(payload, '$.ancestralHome')) AS home
+       FROM app_change_requests
+       WHERE object_type = :t
+         AND object_id = :id
+         AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.ancestralHome')) IS NOT NULL
+         AND TRIM(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.ancestralHome'))) <> ''
+         AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.ancestralHome')) <> 'null'
+       ORDER BY id DESC
+       LIMIT 1`,
+      { t: objectType, id: objectId },
+    );
+    return trimAncestralHome(rows[0]?.home);
+  } catch {
+    return null;
+  }
+}
+
+/** 省/市/区存在 F_ANCESTRAL_HOME，与详细地址 F_ADDRESS 分开存 */
+export async function ensurePeopleAncestralHomeColumn(): Promise<boolean> {
+  if (ancestralHomeColumnReady) return true;
+  if (!(await tableExists("tb_people"))) {
+    ancestralHomeColumnReady = true;
+    return false;
+  }
+  const cols = await query<RowDataPacket[]>(
+    `SELECT 1 AS ok
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'tb_people'
+       AND column_name = 'F_ANCESTRAL_HOME'
+     LIMIT 1`,
+  );
+  if (!cols[0]) {
+    const ddl = `ALTER TABLE tb_people
+      ADD COLUMN F_ANCESTRAL_HOME VARCHAR(255) NULL
+      COMMENT '住址或祖籍（省/市/区）'`;
+    try {
+      await execute(`${ddl}, ALGORITHM=INSTANT`);
+    } catch {
+      try {
+        await execute(ddl);
+      } catch {
+        return false;
+      }
+    }
+  }
+  ancestralHomeColumnReady = true;
+  if (!ancestralHomeBackfilled && (await tableExists("app_change_requests"))) {
+    try {
+      await execute(
+        `UPDATE tb_people p
+         INNER JOIN (
+           SELECT object_id AS pid, MAX(id) AS max_id
+           FROM app_change_requests
+           WHERE object_type = 'people'
+             AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.ancestralHome')) IS NOT NULL
+             AND TRIM(JSON_UNQUOTE(JSON_EXTRACT(payload, '$.ancestralHome'))) <> ''
+             AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.ancestralHome')) <> 'null'
+           GROUP BY object_id
+         ) t ON t.pid = p.F_ID
+         INNER JOIN app_change_requests cr ON cr.id = t.max_id
+         SET p.F_ANCESTRAL_HOME = JSON_UNQUOTE(JSON_EXTRACT(cr.payload, '$.ancestralHome'))
+         WHERE IFNULL(p.F_ANCESTRAL_HOME, '') = ''`,
+      );
+    } catch {
+      /* 回填失败不影响读写 */
+    }
+    ancestralHomeBackfilled = true;
+  }
+  return true;
+}
 
 /**
  * 将 tb_people_info.F_PHONE 扩到可存多个号码。
@@ -1292,11 +1383,13 @@ async function findNestedParent(
 export async function getPeopleById(id: number): Promise<PeopleRow | null> {
   const hasRelation = await tableExists("tb_people_relation");
   const hasInfo = await tableExists("tb_people_info");
+  const hasAncestral = await ensurePeopleAncestralHomeColumn();
   const rows = await query<PeopleDb[]>(
     `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
             p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT,
             p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME,
+            ${hasAncestral ? "p.F_ANCESTRAL_HOME" : "NULL AS F_ANCESTRAL_HOME"},
             ${hasRelation ? "r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID" : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID"},
             ${
               hasInfo
@@ -1381,6 +1474,9 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
     person = withCourtesy;
   } catch {
     // courtesy 表未就绪时忽略
+  }
+  if (!(person.ancestralHome || "").trim()) {
+    person.ancestralHome = await loadAncestralHomeFromRequest("people", id);
   }
   try {
     const [withReview] = await attachLatestReviewStatus([person]);
@@ -1716,6 +1812,7 @@ async function insertPeopleRow(
   },
 ) {
   await ensurePeoplePhoneColumn();
+  const hasAncestral = await ensurePeopleAncestralHomeColumn();
   const zi = normalizeCourtesyPart("zi", payload.zi);
   const hao = normalizeCourtesyPart("hao", payload.hao);
   const legacyAlias = composeLegacyAlias(zi, hao, payload.alias || "");
@@ -1725,10 +1822,12 @@ async function insertPeopleRow(
     `INSERT INTO tb_people
       (F_ADDRESS, F_ALIAS, F_BIRTHDAY, F_CHECK_ADMIN, F_CHECK_TIME, F_CREATE_ADMIN, F_CREATE_TIME,
        F_DEATHDAY, F_EDIT_ADMIN, F_EDIT_TIME, F_FLAG, F_GROUP, F_IS_HEIR, F_LEFT, F_LEVEL, F_NAME,
-       F_NO, F_RIGHT, F_SEX, F_LNG_LAT, F_ORIGINAL_DATA, F_PINYIN)
+       F_NO, F_RIGHT, F_SEX, F_LNG_LAT, F_ORIGINAL_DATA, F_PINYIN${
+         hasAncestral ? ", F_ANCESTRAL_HOME" : ""
+       })
      VALUES (?, ?, ?, '', '', 'platform', ?,
              ?, '', '', ?, ?, ?, ?, ?, ?,
-             ?, ?, ?, ?, ?, ?)`,
+             ?, ?, ?, ?, ?, ?${hasAncestral ? ", ?" : ""})`,
     [
       payload.address || "",
       legacyAlias,
@@ -1747,6 +1846,7 @@ async function insertPeopleRow(
       payload.lngLat || "",
       payload.originalData || "1",
       payload.pinyin || "",
+      ...(hasAncestral ? [trimAncestralHome(payload.ancestralHome)] : []),
     ],
   );
   const id = ins.insertId;
@@ -1818,13 +1918,16 @@ export async function applyPeopleUpdate(
   const createTime = normalizeCreateTime(payload.createTime);
   const phone = normalizePhoneForStore(payload.phone);
   await ensurePeoplePhoneColumn();
+  const hasAncestral = await ensurePeopleAncestralHomeColumn();
   await conn.execute(
     `UPDATE tb_people SET
       F_NAME = ?, F_SEX = ?, F_NO = ?, F_LEVEL = ?, F_GROUP = ?,
       F_BIRTHDAY = ?, F_DEATHDAY = ?, F_ADDRESS = ?, F_PINYIN = ?, F_ALIAS = ?,
       F_IS_HEIR = ?, F_ORIGINAL_DATA = ?, F_LNG_LAT = ?,
       F_CREATE_TIME = CASE WHEN ? <> '' THEN ? ELSE F_CREATE_TIME END,
-      F_EDIT_ADMIN = 'platform', F_EDIT_TIME = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')
+      F_EDIT_ADMIN = 'platform', F_EDIT_TIME = DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s')${
+        hasAncestral ? ", F_ANCESTRAL_HOME = ?" : ""
+      }
      WHERE F_ID = ?`,
     [
       payload.name,
@@ -1842,6 +1945,7 @@ export async function applyPeopleUpdate(
       payload.lngLat || "",
       createTime,
       createTime,
+      ...(hasAncestral ? [trimAncestralHome(payload.ancestralHome)] : []),
       id,
     ],
   );

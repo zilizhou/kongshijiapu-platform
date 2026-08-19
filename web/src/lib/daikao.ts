@@ -2,7 +2,7 @@ import { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { AuthError } from "./auth";
 import { execute, query } from "./db";
 import { normalizePhoneForStore } from "./phone";
-import { searchPeople } from "./people";
+import { searchPeople, loadAncestralHomeFromRequest } from "./people";
 import { nameToPinyin } from "./pinyin";
 import {
   DaikaoAdmitStatus,
@@ -547,6 +547,9 @@ export async function getDaikaoById(id: number): Promise<DaikaoRow | null> {
   );
   if (!rows[0]) return null;
   const [mapped] = await attachDaikaoReviewStatus([mapRow(rows[0])]);
+  if (!(mapped.ancestralHome || "").trim()) {
+    mapped.ancestralHome = await loadAncestralHomeFromRequest("daikao", id);
+  }
   return mapped;
 }
 
