@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
       group: sp.get("group") || undefined,
       sex: sp.get("sex") || undefined,
       address: sp.get("address") || undefined,
+      idCard: sp.get("idCard") || undefined,
       parentId: sp.get("parentId") ? Number(sp.get("parentId")) : undefined,
       auditStatus: sp.get("auditStatus") || undefined,
       dataSource:

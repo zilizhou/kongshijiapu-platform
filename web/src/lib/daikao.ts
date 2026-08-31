@@ -1,6 +1,7 @@
 import { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { AuthError } from "./auth";
 import { execute, query } from "./db";
+import { normalizeIdCard, normalizeIdCardForStore } from "./id-card";
 import { normalizePhoneForStore } from "./phone";
 import { searchPeople, loadAncestralHomeFromRequest } from "./people";
 import { nameToPinyin } from "./pinyin";
@@ -86,6 +87,7 @@ const EXTRA_COLUMNS: { name: string; ddl: string }[] = [
   { name: "birthday", ddl: "ADD COLUMN birthday VARCHAR(40) NULL" },
   { name: "deathday", ddl: "ADD COLUMN deathday VARCHAR(40) NULL" },
   { name: "phone", ddl: "ADD COLUMN phone VARCHAR(60) NULL" },
+  { name: "id_card", ddl: "ADD COLUMN id_card VARCHAR(18) NULL" },
   { name: "nation", ddl: "ADD COLUMN nation VARCHAR(20) NULL" },
   { name: "ancestral_home", ddl: "ADD COLUMN ancestral_home VARCHAR(255) NULL" },
   { name: "lng_lat", ddl: "ADD COLUMN lng_lat VARCHAR(80) NULL" },
@@ -113,6 +115,15 @@ export async function ensureDaikaoPeopleColumns() {
       } catch {
         allOk = false;
       }
+    }
+  }
+  if (await columnExists("tb_daikao_people", "id_card")) {
+    try {
+      await execute(
+        `CREATE INDEX idx_daikao_id_card ON tb_daikao_people (id_card)`,
+      );
+    } catch {
+      /* 索引可能已存在 */
     }
   }
   if (allOk) extraColumnsReady = true;
@@ -192,6 +203,7 @@ type DaikaoDb = RowDataPacket & {
   birthday?: string | null;
   deathday?: string | null;
   phone?: string | null;
+  id_card?: string | null;
   nation?: string | null;
   ancestral_home?: string | null;
   lng_lat?: string | null;
@@ -254,6 +266,7 @@ function mapRow(r: DaikaoDb): DaikaoRow {
     birthday: r.birthday ?? null,
     deathday: r.deathday ?? null,
     phone: r.phone ?? null,
+    idCard: r.id_card ?? null,
     nation: r.nation ?? null,
     ancestralHome: r.ancestral_home ?? null,
     lngLat: r.lng_lat ?? null,
@@ -279,7 +292,7 @@ const SELECT_COLS = `d.id, d.source_file, d.source_line, d.volume, d.section_pat
   d.out_heirs, d.description, d.sex, d.spouse, d.address, d.parent_id, d.parent_name,
   d.parent_no, d.created_at,
   d.admit_status, d.admit_request_id, d.admitted_people_id, d.admitted_at,
-  d.pinyin, d.alias, d.zi, d.hao, d.birthday, d.deathday, d.phone, d.nation,
+  d.pinyin, d.alias, d.zi, d.hao, d.birthday, d.deathday, d.phone, d.id_card, d.nation,
   d.ancestral_home, d.lng_lat, d.spouse_info, d.company, d.position,
   d.professional_title, d.college, d.degree, d.birth_father_id, d.birth_mother,
   d.current_mother, d.rank_label, s.sort_no AS sibling_order`;
@@ -312,6 +325,7 @@ export function daikaoToPeoplePayload(
     ancestralHome: d.ancestralHome || "",
     lngLat: d.lngLat || "",
     phone: d.phone || "",
+    idCard: d.idCard || "",
     parentId: parentId !== undefined ? parentId : d.parentId,
     birthFatherId: d.birthFatherId ?? null,
     birthMother: d.birthMother || "",
@@ -360,6 +374,7 @@ export function daikaoRowToPeopleRow(d: DaikaoRow): PeopleRow {
     description: d.description,
     volume: d.volume,
     phone: d.phone ?? null,
+    idCard: d.idCard ?? null,
     company: d.company ?? null,
     position: d.position ?? null,
     professionalTitle: d.professionalTitle ?? null,
@@ -442,6 +457,7 @@ export async function searchDaikao(opts: {
   admitStatus?: string;
   exactName?: boolean;
   parentId?: number;
+  idCard?: string;
   page?: number;
   pageSize?: number;
 }) {
@@ -504,6 +520,16 @@ export async function searchDaikao(opts: {
   if (opts.parentId != null && Number(opts.parentId) > 0) {
     where.push("d.parent_id = :parentId");
     params.parentId = Number(opts.parentId);
+  }
+  const idCardQ = normalizeIdCard(opts.idCard);
+  if (idCardQ) {
+    if (idCardQ.length >= 15) {
+      where.push("d.id_card = :idCard");
+      params.idCard = idCardQ;
+    } else {
+      where.push("d.id_card LIKE :idCard");
+      params.idCard = `%${idCardQ}%`;
+    }
   }
 
   const whereSql = where.join(" AND ");
@@ -1057,6 +1083,7 @@ async function insertDaikaoRow(
 ) {
   const g = splitGroup(meta.groupRaw);
   const phone = normalizePhoneForStore(payload.phone);
+  const idCard = normalizeIdCardForStore(payload.idCard);
   const rank =
     payload.rank ||
     (payload.siblingOrder != null
@@ -1068,12 +1095,12 @@ async function insertDaikaoRow(
        indent_spaces, name, spectrum_no, generation, generation_label,
        group_raw, group1, group2, group3, description, sex, spouse, address,
        parent_id, parent_name, parent_no, pinyin, alias, zi, hao, birthday,
-       deathday, phone, nation, ancestral_home, lng_lat, spouse_info, company,
+       deathday, phone, id_card, nation, ancestral_home, lng_lat, spouse_info, company,
        position, professional_title, college, degree, birth_father_id,
        birth_mother, current_mother, rank_label, admit_status
      ) VALUES (
        ?, 0, ?, NULL, 0, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'none'
+       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'none'
      )`,
     [
       "平台录入",
@@ -1101,6 +1128,7 @@ async function insertDaikaoRow(
       payload.birthday || null,
       payload.deathday || null,
       phone || null,
+      idCard || null,
       payload.nation || null,
       payload.ancestralHome || null,
       payload.lngLat || null,
@@ -1306,6 +1334,7 @@ export async function applyDaikaoUpdate(
   }
   const g = splitGroup(groupRaw);
   const phone = normalizePhoneForStore(payload.phone);
+  const idCard = normalizeIdCardForStore(payload.idCard);
   const rank =
     payload.rank ||
     (payload.siblingOrder != null
@@ -1318,7 +1347,7 @@ export async function applyDaikaoUpdate(
        group_raw = ?, group1 = ?, group2 = ?, group3 = ?, description = ?,
        sex = ?, spouse = ?, address = ?, volume = ?, parent_id = ?,
        parent_name = ?, parent_no = ?, is_out_heir = ?, pinyin = ?, alias = ?,
-       zi = ?, hao = ?, birthday = ?, deathday = ?, phone = ?, nation = ?,
+       zi = ?, hao = ?, birthday = ?, deathday = ?, phone = ?, id_card = ?, nation = ?,
        ancestral_home = ?, lng_lat = ?, spouse_info = ?, company = ?,
        position = ?, professional_title = ?, college = ?, degree = ?,
        birth_father_id = ?, birth_mother = ?, current_mother = ?, rank_label = ?
@@ -1348,6 +1377,7 @@ export async function applyDaikaoUpdate(
       payload.birthday || null,
       payload.deathday || null,
       phone || null,
+      idCard || null,
       payload.nation || null,
       payload.ancestralHome || null,
       payload.lngLat || null,

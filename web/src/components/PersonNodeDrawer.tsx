@@ -245,6 +245,7 @@ export function PersonNodeDrawer({
                   ["父名", person.parentName],
                   ["地址", formatFullAddress(person)],
                   ["联系电话", person.phone],
+                  ["身份证号码", person.idCard],
                   ["生年", person.birthday],
                   ["卒年", person.deathday],
                   ["配偶", person.spouse],

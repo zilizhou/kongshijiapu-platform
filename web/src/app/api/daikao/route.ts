@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
       admitStatus: sp.get("admitStatus") || undefined,
       exactName: ["1", "true", "yes"].includes(exactNameRaw),
       parentId: sp.get("parentId") ? Number(sp.get("parentId")) : undefined,
+      idCard: sp.get("idCard") || undefined,
       page: sp.get("page") ? Number(sp.get("page")) : 1,
       pageSize: sp.get("pageSize") ? Number(sp.get("pageSize")) : 10,
     });

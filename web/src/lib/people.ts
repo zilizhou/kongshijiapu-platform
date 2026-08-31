@@ -8,6 +8,7 @@ import {
 } from "./courtesy";
 import { peopleToPayload } from "./people-client";
 import { LineageNode, PeoplePayload, PeopleRow } from "./types";
+import { normalizeIdCard, normalizeIdCardForStore } from "./id-card";
 import { normalizePhoneForStore, PEOPLE_PHONE_MAX_CHARS } from "./phone";
 
 export { peopleToPayload };
@@ -46,6 +47,7 @@ type PeopleDb = RowDataPacket & {
   F_DESCRIPTION: string | null;
   F_VOLUME: string | null;
   F_PHONE: string | null;
+  F_IDCARD?: string | null;
   F_COMPANY: string | null;
   F_POSITION: string | null;
   F_PROFESSIONAL_TITLE: string | null;
@@ -88,6 +90,7 @@ function mapRow(r: PeopleDb): PeopleRow {
     description: r.F_DESCRIPTION,
     volume: r.F_VOLUME,
     phone: r.F_PHONE ?? null,
+    idCard: r.F_IDCARD ?? null,
     company: r.F_COMPANY ?? null,
     position: r.F_POSITION ?? null,
     professionalTitle: r.F_PROFESSIONAL_TITLE ?? null,
@@ -398,6 +401,8 @@ export async function searchPeople(opts: {
   group?: string;
   sex?: string;
   address?: string;
+  /** 身份证号码（完整精确，或后几位模糊） */
+  idCard?: string;
   parentId?: number;
   /** 按最新变更单状态筛选 */
   auditStatus?: string;
@@ -502,6 +507,23 @@ export async function searchPeople(opts: {
       ),
     );
   }
+  const idCardQ = normalizeIdCard(opts.idCard);
+  if (idCardQ) {
+    const hasIdCard = await ensurePeopleIdCardColumn();
+    if (!hasIdCard) {
+      where.push("1=0");
+    } else if (idCardQ.length >= 15) {
+      where.push(
+        `EXISTS (SELECT 1 FROM tb_people_info ic WHERE ic.F_PEOPLE_ID = p.F_ID AND ic.F_IDCARD = :idCard)`,
+      );
+      params.idCard = idCardQ;
+    } else {
+      where.push(
+        `EXISTS (SELECT 1 FROM tb_people_info ic WHERE ic.F_PEOPLE_ID = p.F_ID AND ic.F_IDCARD LIKE :idCard)`,
+      );
+      params.idCard = `%${idCardQ}%`;
+    }
+  }
   if (opts.dataSource === "platform") {
     where.push("p.F_CREATE_ADMIN = 'platform'");
   } else if (opts.dataSource === "legacy") {
@@ -603,7 +625,8 @@ export async function searchPeople(opts: {
       pinyin ||
       ziHao ||
       opts.no ||
-      opts.address,
+      opts.address ||
+      idCardQ,
   );
   const orderBy = hasLookupFilter
     ? `ORDER BY (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END), p.F_ID DESC`
@@ -717,6 +740,24 @@ async function attachListParentAndChildMeta(
     /* ignore */
   }
 
+  const idCardById = new Map<number, string | null>();
+  try {
+    if (await ensurePeopleIdCardColumn()) {
+      const infoRows = await query<RowDataPacket[]>(
+        `SELECT F_PEOPLE_ID AS id, F_IDCARD AS idCard
+         FROM tb_people_info
+         WHERE F_PEOPLE_ID IN (${ph})`,
+        ids,
+      );
+      for (const r of infoRows) {
+        const v = r.idCard != null ? String(r.idCard).trim() : "";
+        idCardById.set(Number(r.id), v || null);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
   // 仍缺父名时用 nested-set 启发式：区间大于 1 视为有子代
   return people.map((p) => {
     const meta = parentById.get(p.id);
@@ -727,6 +768,7 @@ async function attachListParentAndChildMeta(
       parentName: meta?.parentName ?? p.parentName,
       birthFatherId: meta?.birthFatherId ?? p.birthFatherId,
       childCount: cc != null ? cc : p.childCount,
+      idCard: idCardById.has(p.id) ? idCardById.get(p.id) : p.idCard,
     };
   });
 }
@@ -952,6 +994,47 @@ export async function ensurePeoplePhoneColumn() {
       // 无权限或锁表时下次再试
     }
   }
+}
+
+let idCardColumnReady = false;
+
+export async function ensurePeopleIdCardColumn(): Promise<boolean> {
+  if (idCardColumnReady) return true;
+  if (!(await tableExists("tb_people_info"))) {
+    idCardColumnReady = true;
+    return false;
+  }
+  const cols = await query<RowDataPacket[]>(
+    `SELECT 1 AS ok
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'tb_people_info'
+       AND column_name = 'F_IDCARD'
+     LIMIT 1`,
+  );
+  if (!cols[0]) {
+    const ddl = `ALTER TABLE tb_people_info
+      ADD COLUMN F_IDCARD VARCHAR(18) NULL
+      COMMENT '身份证号码'`;
+    try {
+      await execute(`${ddl}, ALGORITHM=INSTANT`);
+    } catch {
+      try {
+        await execute(ddl);
+      } catch {
+        return false;
+      }
+    }
+  }
+  try {
+    await execute(
+      `CREATE INDEX idx_people_info_idcard ON tb_people_info (F_IDCARD)`,
+    );
+  } catch {
+    /* 索引可能已存在 */
+  }
+  idCardColumnReady = true;
+  return true;
 }
 
 async function loadCourtesyMap(
@@ -1384,6 +1467,7 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
   const hasRelation = await tableExists("tb_people_relation");
   const hasInfo = await tableExists("tb_people_info");
   const hasAncestral = await ensurePeopleAncestralHomeColumn();
+  const hasIdCard = hasInfo ? await ensurePeopleIdCardColumn() : false;
   const rows = await query<PeopleDb[]>(
     `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
@@ -1394,10 +1478,11 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
             ${
               hasInfo
                 ? `i.F_SPOUSE, i.F_SPOUSE_INFO, i.F_DESCRIPTION, i.F_VOLUME,
-                   i.F_PHONE, i.F_COMPANY, i.F_POSITION, i.F_PROFESSIONAL_TITLE, i.F_COLLEGE, i.F_DEGREE`
+                   i.F_PHONE, i.F_COMPANY, i.F_POSITION, i.F_PROFESSIONAL_TITLE, i.F_COLLEGE, i.F_DEGREE,
+                   ${hasIdCard ? "i.F_IDCARD" : "NULL AS F_IDCARD"}`
                 : `NULL AS F_SPOUSE, NULL AS F_SPOUSE_INFO, NULL AS F_DESCRIPTION, NULL AS F_VOLUME,
                    NULL AS F_PHONE, NULL AS F_COMPANY, NULL AS F_POSITION, NULL AS F_PROFESSIONAL_TITLE,
-                   NULL AS F_COLLEGE, NULL AS F_DEGREE`
+                   NULL AS F_COLLEGE, NULL AS F_DEGREE, NULL AS F_IDCARD`
             },
             ${
               hasRelation
@@ -1813,6 +1898,8 @@ async function insertPeopleRow(
 ) {
   await ensurePeoplePhoneColumn();
   const hasAncestral = await ensurePeopleAncestralHomeColumn();
+  const hasIdCard = await ensurePeopleIdCardColumn();
+  const idCard = normalizeIdCardForStore(payload.idCard);
   const zi = normalizeCourtesyPart("zi", payload.zi);
   const hao = normalizeCourtesyPart("hao", payload.hao);
   const legacyAlias = composeLegacyAlias(zi, hao, payload.alias || "");
@@ -1861,8 +1948,10 @@ async function insertPeopleRow(
       `INSERT INTO tb_people_info
         (F_PEOPLE_ID, F_BIOGRAPHY, F_COLLEGE, F_COMPANY, F_DEGREE, F_DESCRIPTION, F_INDUSTRY,
          F_IS_FIRST_MOVE, F_MAJOR, F_POSITION, F_PROFESSIONAL_TITLE, F_SPOUSE, F_SPOUSE_INFO,
-         F_VOLUME, F_PHONE, F_RESUME)
-       VALUES (?, '', ?, ?, ?, ?, '', '0', '', ?, ?, ?, ?, ?, ?, '')`,
+         F_VOLUME, F_PHONE, F_RESUME${hasIdCard ? ", F_IDCARD" : ""})
+       VALUES (?, '', ?, ?, ?, ?, '', '0', '', ?, ?, ?, ?, ?, ?, ''${
+         hasIdCard ? ", ?" : ""
+       })`,
       [
         id,
         payload.college || "",
@@ -1875,6 +1964,7 @@ async function insertPeopleRow(
         payload.spouseInfo || "",
         payload.volume || "",
         normalizePhoneForStore(payload.phone),
+        ...(hasIdCard ? [idCard || null] : []),
       ],
     );
   }
@@ -1917,8 +2007,10 @@ export async function applyPeopleUpdate(
   );
   const createTime = normalizeCreateTime(payload.createTime);
   const phone = normalizePhoneForStore(payload.phone);
+  const idCard = normalizeIdCardForStore(payload.idCard);
   await ensurePeoplePhoneColumn();
   const hasAncestral = await ensurePeopleAncestralHomeColumn();
+  const hasIdCard = await ensurePeopleIdCardColumn();
   await conn.execute(
     `UPDATE tb_people SET
       F_NAME = ?, F_SEX = ?, F_NO = ?, F_LEVEL = ?, F_GROUP = ?,
@@ -1953,7 +2045,7 @@ export async function applyPeopleUpdate(
     `UPDATE tb_people_info SET
       F_DESCRIPTION = ?, F_SPOUSE = ?, F_SPOUSE_INFO = ?, F_VOLUME = ?,
       F_PHONE = ?, F_COMPANY = ?, F_POSITION = ?, F_PROFESSIONAL_TITLE = ?,
-      F_COLLEGE = ?, F_DEGREE = ?
+      F_COLLEGE = ?, F_DEGREE = ?${hasIdCard ? ", F_IDCARD = ?" : ""}
      WHERE F_PEOPLE_ID = ?`,
     [
       payload.description || "",
@@ -1966,6 +2058,7 @@ export async function applyPeopleUpdate(
       payload.professionalTitle || "",
       payload.college || "",
       payload.degree || "",
+      ...(hasIdCard ? [idCard || null] : []),
       id,
     ],
   );

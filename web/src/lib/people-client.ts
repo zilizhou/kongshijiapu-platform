@@ -78,6 +78,7 @@ export function peopleToPayload(p: PeopleRow): PeoplePayload {
     ancestralHome: p.ancestralHome || "",
     lngLat: p.lngLat || "",
     phone: formatPhones(parsePhones(p.phone || "")),
+    idCard: p.idCard || "",
     parentId: p.parentId,
     birthFatherId: p.birthFatherId,
     birthMother: p.birthMother || "",

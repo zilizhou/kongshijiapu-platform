@@ -12,6 +12,7 @@ export interface ParsedPerson {
   college?: string;
   company?: string;
   phone?: string;
+  idCard?: string;
   spouse?: string;
   sex?: "男" | "女";
   children: string[];
@@ -144,6 +145,9 @@ function parseOneBlock(block: string, index: number): ParsedPerson | null {
     college: normalizeEmpty(map.get("毕业学校") || map.get("毕业院校") || "") || undefined,
     company,
     phone: formatPhones(parsePhones(normalizeEmpty(map.get("联系电话") || map.get("电话") || ""))) || undefined,
+    idCard:
+      normalizeEmpty(map.get("身份证号码") || map.get("身份证号") || map.get("身份证") || "") ||
+      undefined,
     spouse: spouse || undefined,
     sex,
     children,
@@ -176,6 +180,7 @@ export function parsedPersonToPayloadPatch(
   if (p.college) patch.college = p.college;
   if (p.company) patch.company = p.company;
   if (p.phone) patch.phone = p.phone;
+  if (p.idCard) patch.idCard = p.idCard;
   if (p.spouse) patch.spouse = p.spouse;
   if (p.address) {
     patch.address = p.address;

@@ -421,6 +421,15 @@ export function PeopleForm({
           onChange={(v) => set("phone", v)}
         />
       </Field>
+      <Field label="身份证号码" {...mark("idCard")}>
+        <Input
+          disabled={disabled}
+          value={value.idCard || ""}
+          onChange={(e) => set("idCard", e.target.value)}
+          placeholder="15 位或 18 位，末位可为 X"
+          maxLength={18}
+        />
+      </Field>
 
       <Field label="出生时间" {...mark("birthday")}>
         <FlexibleDateField
@@ -624,6 +633,7 @@ export const emptyPayload = (): PeoplePayload => ({
   ancestralHome: "",
   lngLat: "",
   phone: "",
+  idCard: "",
   parentId: null,
   asParentOf: null,
   birthFatherId: null,

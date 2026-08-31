@@ -91,6 +91,7 @@ type PeopleFilters = {
   group: string;
   sex: string;
   address: string;
+  idCard: string;
 };
 
 const emptyFilters: PeopleFilters = {
@@ -105,6 +106,7 @@ const emptyFilters: PeopleFilters = {
   group: "",
   sex: "",
   address: "",
+  idCard: "",
 };
 
 export default function PeoplePage() {
@@ -121,6 +123,7 @@ export default function PeoplePage() {
   const [group, setGroup] = useState("");
   const [sex, setSex] = useState("");
   const [address, setAddress] = useState("");
+  const [idCard, setIdCard] = useState("");
   const [filters, setFilters] = useState<PeopleFilters>(emptyFilters);
   const [auditStatus, setAuditStatus] = useState("");
   const [dataSource, setDataSource] = useState("");
@@ -163,6 +166,7 @@ export default function PeoplePage() {
       setGroup(q0.group);
       setSex(q0.sex);
       setAddress(q0.address);
+      setIdCard(q0.idCard);
       setFilters({
         name: q0.name,
         fatherName: q0.fatherName,
@@ -175,6 +179,7 @@ export default function PeoplePage() {
         group: q0.group,
         sex: q0.sex,
         address: q0.address,
+        idCard: q0.idCard,
       });
       setAuditStatus(q0.auditStatus);
       setDataSource(q0.dataSource);
@@ -234,6 +239,7 @@ export default function PeoplePage() {
     if (filters.group) sp.set("group", filters.group);
     if (filters.sex) sp.set("sex", filters.sex);
     if (filters.address) sp.set("address", filters.address);
+    if (filters.idCard) sp.set("idCard", filters.idCard);
     if (auditStatus) sp.set("auditStatus", auditStatus);
     if (dataSource === "legacy" || dataSource === "platform") {
       sp.set("dataSource", dataSource);
@@ -285,6 +291,7 @@ export default function PeoplePage() {
     group,
     sex,
     address,
+    idCard,
   }) {
     setFilters(next);
     setPage(1);
@@ -302,6 +309,7 @@ export default function PeoplePage() {
     setGroup("");
     setSex("");
     setAddress("");
+    setIdCard("");
     setAuditStatus("");
     setDataSource("");
     savePeopleListQuery("");
@@ -518,6 +526,18 @@ export default function PeoplePage() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             placeholder="地址"
+          />
+        </FilterField>
+        <FilterField className="w-44">
+          <Input
+            compact
+            clearable
+            value={idCard}
+            onChange={(e) => setIdCard(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applySearch();
+            }}
+            placeholder="身份证号码"
           />
         </FilterField>
         <FilterField className="w-32">
@@ -867,6 +887,7 @@ export default function PeoplePage() {
                 ["父名", drawer.parentName],
                 ["地址", drawer.address],
                 ["联系电话", drawer.phone],
+                ["身份证号码", drawer.idCard],
                 ["生年", drawer.birthday],
                 ["卒年", drawer.deathday],
                 ["配偶", drawer.spouse],

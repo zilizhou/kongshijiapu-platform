@@ -111,6 +111,7 @@ export default function DaikaoPage() {
   const [group, setGroup] = useState("");
   const [sourceFile, setSourceFile] = useState("");
   const [volume, setVolume] = useState("");
+  const [idCard, setIdCard] = useState("");
   const [admitStatus, setAdmitStatus] = useState("none");
   const [applied, setApplied] = useState({
     name: "",
@@ -119,6 +120,7 @@ export default function DaikaoPage() {
     group: "",
     sourceFile: "",
     volume: "",
+    idCard: "",
     admitStatus: "none",
   });
   const [page, setPage] = useState(1);
@@ -171,6 +173,7 @@ export default function DaikaoPage() {
     if (applied.group) sp.set("group", applied.group);
     if (applied.sourceFile) sp.set("sourceFile", applied.sourceFile);
     if (applied.volume) sp.set("volume", applied.volume);
+    if (applied.idCard) sp.set("idCard", applied.idCard);
     if (applied.admitStatus) sp.set("admitStatus", applied.admitStatus);
     try {
       const res = await fetch(`/api/daikao?${sp}`);
@@ -194,7 +197,7 @@ export default function DaikaoPage() {
 
   function search() {
     setPage(1);
-    setApplied({ name, no, level, group, sourceFile, volume, admitStatus });
+    setApplied({ name, no, level, group, sourceFile, volume, idCard, admitStatus });
   }
 
   function reset() {
@@ -204,6 +207,7 @@ export default function DaikaoPage() {
     setGroup("");
     setSourceFile("");
     setVolume("");
+    setIdCard("");
     setAdmitStatus("none");
     setPage(1);
     setApplied({
@@ -213,6 +217,7 @@ export default function DaikaoPage() {
       group: "",
       sourceFile: "",
       volume: "",
+      idCard: "",
       admitStatus: "none",
     });
   }
@@ -312,6 +317,15 @@ export default function DaikaoPage() {
             value={no}
             onChange={(e) => setNo(e.target.value)}
             placeholder="谱号"
+          />
+        </FilterField>
+        <FilterField className="w-44">
+          <Input
+            compact
+            clearable
+            value={idCard}
+            onChange={(e) => setIdCard(e.target.value)}
+            placeholder="身份证号码"
           />
         </FilterField>
         <FilterField className="w-24">

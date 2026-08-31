@@ -12,6 +12,7 @@ export type PeopleListQuery = {
   group: string;
   sex: string;
   address: string;
+  idCard: string;
   auditStatus: string;
   dataSource: string;
   page: number;
@@ -30,6 +31,7 @@ export const emptyPeopleListQuery = (): PeopleListQuery => ({
   group: "",
   sex: "",
   address: "",
+  idCard: "",
   auditStatus: "",
   dataSource: "",
   page: 1,
@@ -51,6 +53,7 @@ export function buildPeopleListSearch(q: PeopleListQuery): string {
   if (q.group) sp.set("group", q.group);
   if (q.sex) sp.set("sex", q.sex);
   if (q.address) sp.set("address", q.address);
+  if (q.idCard) sp.set("idCard", q.idCard);
   if (q.auditStatus) sp.set("auditStatus", q.auditStatus);
   if (q.dataSource) sp.set("dataSource", q.dataSource);
   if (q.page > 1) sp.set("page", String(q.page));
@@ -77,6 +80,7 @@ export function parsePeopleListSearch(
     group: params.get("group") || "",
     sex: params.get("sex") || "",
     address: params.get("address") || "",
+    idCard: params.get("idCard") || "",
     auditStatus: params.get("auditStatus") || "",
     dataSource: params.get("dataSource") || "",
     page: Number.isFinite(page) && page > 0 ? page : 1,
@@ -115,6 +119,7 @@ export function hasPeopleListFilters(q: PeopleListQuery): boolean {
       q.group ||
       q.sex ||
       q.address ||
+      q.idCard ||
       q.auditStatus ||
       q.dataSource,
   );

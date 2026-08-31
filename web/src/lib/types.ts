@@ -91,6 +91,8 @@ export type PeoplePayload = {
   lngLat?: string;
   /** 联系电话，多个用顿号「、」分隔 */
   phone?: string;
+  /** 身份证号码，15 或 18 位 */
+  idCard?: string;
   parentId?: number | null;
   /** 终审落库时，将此人插入为该成员的父节点（并接管其原父） */
   asParentOf?: number | null;
@@ -146,6 +148,7 @@ export type PeopleRow = {
   description: string | null;
   volume: string | null;
   phone: string | null;
+  idCard?: string | null;
   company: string | null;
   position: string | null;
   professionalTitle: string | null;
@@ -255,6 +258,7 @@ export type DaikaoRow = {
   birthday?: string | null;
   deathday?: string | null;
   phone?: string | null;
+  idCard?: string | null;
   nation?: string | null;
   ancestralHome?: string | null;
   lngLat?: string | null;
