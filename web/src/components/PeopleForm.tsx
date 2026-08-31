@@ -11,6 +11,7 @@ import {
   parseRankToIndex,
   rankLabelSimplified,
 } from "@/lib/zh";
+import { parseIdCardProfile } from "@/lib/id-card";
 import { FlexibleDateField } from "./FlexibleDateField";
 import { BranchPicker } from "./BranchPicker";
 import { PersonPicker } from "./PersonPicker";
@@ -154,6 +155,25 @@ export function PeopleForm({
     }
   }
 
+  function onIdCardChange(raw: string) {
+    const parsed = parseIdCardProfile(raw);
+    if (!parsed) {
+      set("idCard", raw);
+      return;
+    }
+    const sex = parsed.sex;
+    const idx = value.siblingOrder ?? parseRankToIndex(value.rank || "");
+    onChange({
+      ...value,
+      idCard: raw,
+      sex,
+      birthday: parsed.birthday,
+      ...(idx != null
+        ? { siblingOrder: idx, rank: rankLabelSimplified(sex, idx) }
+        : {}),
+    });
+  }
+
   return (
     <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
       {/* 必填项置顶 */}
@@ -163,6 +183,15 @@ export function PeopleForm({
           value={value.name || ""}
           onChange={(e) => onNameChange(e.target.value)}
           placeholder="请输入姓名"
+        />
+      </Field>
+      <Field label="身份证号码" {...mark("idCard")}>
+        <Input
+          disabled={disabled}
+          value={value.idCard || ""}
+          onChange={(e) => onIdCardChange(e.target.value)}
+          placeholder="15 位或 18 位，末位可为 X"
+          maxLength={18}
         />
       </Field>
       <Field label="性别" required {...mark("sex")}>
@@ -419,15 +448,6 @@ export function PeopleForm({
           disabled={disabled}
           value={value.phone || ""}
           onChange={(v) => set("phone", v)}
-        />
-      </Field>
-      <Field label="身份证号码" {...mark("idCard")}>
-        <Input
-          disabled={disabled}
-          value={value.idCard || ""}
-          onChange={(e) => set("idCard", e.target.value)}
-          placeholder="15 位或 18 位，末位可为 X"
-          maxLength={18}
         />
       </Field>
 

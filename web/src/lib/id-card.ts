@@ -36,3 +36,46 @@ export function normalizeIdCardForStore(
   }
   return id;
 }
+
+export type IdCardProfile = {
+  birthday: string;
+  sex: "男" | "女";
+};
+
+function formatYmd(year: number, month: number, day: number): string | null {
+  if (month < 1 || month > 12 || day < 1) return null;
+  const max = new Date(year, month, 0).getDate();
+  if (day > max) return null;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** 从合法身份证解析出生日期（YYYY-MM-DD）与性别；不合法返回 null */
+export function parseIdCardProfile(
+  input: string | null | undefined,
+): IdCardProfile | null {
+  const id = normalizeIdCard(input);
+  if (!id || !isValidIdCard(id)) return null;
+
+  let year: number;
+  let month: number;
+  let day: number;
+  let genderDigit: number;
+  if (id.length === 18) {
+    year = Number(id.slice(6, 10));
+    month = Number(id.slice(10, 12));
+    day = Number(id.slice(12, 14));
+    genderDigit = Number(id[16]);
+  } else {
+    year = 1900 + Number(id.slice(6, 8));
+    month = Number(id.slice(8, 10));
+    day = Number(id.slice(10, 12));
+    genderDigit = Number(id[14]);
+  }
+  if (!Number.isInteger(genderDigit)) return null;
+  const birthday = formatYmd(year, month, day);
+  if (!birthday) return null;
+  return {
+    birthday,
+    sex: genderDigit % 2 === 1 ? "男" : "女",
+  };
+}
