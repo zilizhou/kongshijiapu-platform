@@ -16,16 +16,16 @@ export function parsePeopleFeeStatus(
   return null;
 }
 
-/** 新增落库：未写则未收费 */
+/** 新增落库：未写则未交费 */
 export function feeStatusForInsert(input: unknown): PeopleFeeStatus {
   return input === "paid" ? "paid" : "unpaid";
 }
 
 export function peopleFeeStatusLabel(status: PeopleFeeStatus): string {
-  return status === "paid" ? "已交费" : "未收费";
+  return status === "paid" ? "已交费" : "未交费";
 }
 
-/** 列表/详情：仅新录入显示；缺省当作未收费 */
+/** 列表/详情：仅新录入显示；缺省当作未交费 */
 export function displayFeeStatus(input: {
   createAdmin?: string | null;
   feeStatus?: string | null;

@@ -645,7 +645,7 @@ export default function PeoplePage() {
           >
             <option value="">缴费状态</option>
             <option value="paid">已交费</option>
-            <option value="unpaid">未收费</option>
+            <option value="unpaid">未交费</option>
           </Select>
         </FilterField>
         {moreFilters ? (

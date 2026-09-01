@@ -118,7 +118,7 @@ export type PeoplePayload = {
   createTime?: string;
   /** 来源待考成员 ID；终审通过后回写待考入谱状态 */
   sourceDaikaoId?: number | null;
-  /** 缴费状态；仅本平台新录入。paid=已交费，unpaid=未收费 */
+  /** 缴费状态；仅本平台新录入。paid=已交费，unpaid=未交费 */
   feeStatus?: "paid" | "unpaid";
 };
 

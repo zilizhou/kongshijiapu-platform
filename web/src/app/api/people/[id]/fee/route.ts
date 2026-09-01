@@ -19,7 +19,7 @@ export async function PATCH(
     const feeStatus = parsePeopleFeeStatus(body?.feeStatus);
     if (!feeStatus) {
       return NextResponse.json(
-        { error: "缴费状态须为已交费或未收费" },
+        { error: "缴费状态须为已交费或未交费" },
         { status: 400 },
       );
     }

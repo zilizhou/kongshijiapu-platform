@@ -414,7 +414,7 @@ export async function searchPeople(opts: {
   auditStatus?: string;
   /** legacy=旧谱底库（非 platform）；platform=本平台新录 */
   dataSource?: "legacy" | "platform";
-  /** paid=已交费（含旧谱）；unpaid=未收费 */
+  /** paid=已交费（含旧谱）；unpaid=未交费 */
   feeStatus?: "paid" | "unpaid";
   page?: number;
   pageSize?: number;

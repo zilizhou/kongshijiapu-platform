@@ -194,7 +194,7 @@ export function FeeStatusPill({
   const cls = paid
     ? "bg-emerald-50 text-emerald-800"
     : "bg-amber-50 text-amber-900";
-  const label = paid ? "已交费" : "未收费";
+  const label = paid ? "已交费" : "未交费";
   const className = `inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${cls}`;
   if (onToggle && !disabled) {
     return (

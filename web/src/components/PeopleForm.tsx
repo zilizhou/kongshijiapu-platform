@@ -274,7 +274,7 @@ export function PeopleForm({
             value={value.feeStatus === "paid" ? "paid" : "unpaid"}
             onChange={(v) => onFeeStatusChange(v === "paid" ? "paid" : "unpaid")}
             options={[
-              { value: "unpaid", label: "未收费" },
+              { value: "unpaid", label: "未交费" },
               { value: "paid", label: "已交费" },
             ]}
           />
@@ -737,7 +737,7 @@ export const emptyPayload = (): PeoplePayload => ({
 });
 
 /**
- * 回填已有成员：不要带上「新增默认未收费」。
+ * 回填已有成员：不要带上「新增默认未交费」。
  * 仅当来源本身带有缴费状态（本平台新录入）时保留。
  */
 export function fillExistingPeoplePayload(
