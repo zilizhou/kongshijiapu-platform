@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
+import { emptyPayload, fillExistingPeoplePayload, PeopleForm } from "@/components/PeopleForm";
 import { PeopleListBackLink } from "@/components/PeopleListBackLink";
 import { Button, Card } from "@/components/ui";
 import { normalizePeopleRank, peopleToPayload } from "@/lib/people-client";
@@ -15,7 +15,8 @@ import {
 } from "@/lib/people-scope";
 
 function rowToPayload(p: PeopleRow): PeoplePayload {
-  return { ...emptyPayload(), ...peopleToPayload(p) };
+  const mapped = peopleToPayload(p);
+  return fillExistingPeoplePayload(mapped, mapped);
 }
 
 function NewEditInner() {

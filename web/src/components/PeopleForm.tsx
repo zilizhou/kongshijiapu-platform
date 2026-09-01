@@ -180,9 +180,7 @@ export function PeopleForm({
 
   const showFeeStatus =
     scope !== "daikao" &&
-    (value.feeStatus === "paid" ||
-      value.feeStatus === "unpaid" ||
-      !compareWith);
+    (value.feeStatus === "paid" || value.feeStatus === "unpaid");
 
   function onFeeStatusChange(next: "paid" | "unpaid") {
     onChange({ ...value, feeStatus: next });
@@ -737,6 +735,30 @@ export const emptyPayload = (): PeoplePayload => ({
   sourceDaikaoId: null,
   feeStatus: "unpaid",
 });
+
+/**
+ * 回填已有成员：不要带上「新增默认未收费」。
+ * 仅当来源本身带有缴费状态（本平台新录入）时保留。
+ */
+export function fillExistingPeoplePayload(
+  patch: Partial<PeoplePayload>,
+  before?: Partial<PeoplePayload> | null,
+): PeoplePayload {
+  const { feeStatus: _createDefault, ...defaults } = emptyPayload();
+  const next: PeoplePayload = { ...defaults, ...patch };
+  const sourceTracked =
+    patch.feeStatus === "paid" ||
+    before?.feeStatus === "paid" ||
+    before?.feeStatus === "unpaid";
+  if (sourceTracked && (patch.feeStatus === "paid" || patch.feeStatus === "unpaid")) {
+    next.feeStatus = patch.feeStatus;
+  } else if (sourceTracked && (before?.feeStatus === "paid" || before?.feeStatus === "unpaid")) {
+    next.feeStatus = before.feeStatus;
+  } else {
+    delete next.feeStatus;
+  }
+  return next;
+}
 
 function defaultCreateTime(): string {
   const d = new Date();

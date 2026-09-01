@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { BranchForm, emptyBranchPayload } from "@/components/BranchForm";
-import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
+import { emptyPayload, fillExistingPeoplePayload, PeopleForm } from "@/components/PeopleForm";
 import { Button, Card, StatusPill } from "@/components/ui";
 import { networkErrorMessage, readJsonResponse } from "@/lib/api-client";
 import { normalizePeopleRank } from "@/lib/people-client";
@@ -49,11 +49,16 @@ export default function EditDetailPage() {
     if (it.objectType === "branch") {
       setPayload({ ...emptyBranchPayload(), ...(it.payload as BranchPayload) });
     } else {
+      const peoplePayload = it.payload as PeoplePayload;
       setPayload(
-        normalizePeopleRank({
-          ...emptyPayload(),
-          ...(it.payload as PeoplePayload),
-        }),
+        normalizePeopleRank(
+          it.operation === "create"
+            ? { ...emptyPayload(), ...peoplePayload }
+            : fillExistingPeoplePayload(
+                peoplePayload,
+                it.beforeSnapshot as PeoplePayload | null,
+              ),
+        ),
       );
     }
     setEvents(data.events || []);

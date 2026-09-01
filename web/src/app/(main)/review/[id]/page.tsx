@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { BranchForm, emptyBranchPayload } from "@/components/BranchForm";
-import { emptyPayload, PeopleForm } from "@/components/PeopleForm";
+import { emptyPayload, fillExistingPeoplePayload, PeopleForm } from "@/components/PeopleForm";
 import { Button, Card, Label, PageHeader, StatusPill, Textarea } from "@/components/ui";
 import {
   BranchPayload,
@@ -61,7 +61,15 @@ export default function ReviewDetailPage() {
     if (it.objectType === "branch") {
       setPayload({ ...emptyBranchPayload(), ...(it.payload as BranchPayload) });
     } else {
-      setPayload({ ...emptyPayload(), ...(it.payload as PeoplePayload) });
+      const peoplePayload = it.payload as PeoplePayload;
+      setPayload(
+        it.operation === "create"
+          ? { ...emptyPayload(), ...peoplePayload }
+          : fillExistingPeoplePayload(
+              peoplePayload,
+              it.beforeSnapshot as PeoplePayload | null,
+            ),
+      );
     }
     setDirty(false);
   }
