@@ -744,7 +744,8 @@ export function fillExistingPeoplePayload(
   patch: Partial<PeoplePayload>,
   before?: Partial<PeoplePayload> | null,
 ): PeoplePayload {
-  const { feeStatus: _createDefault, ...defaults } = emptyPayload();
+  const defaults = emptyPayload();
+  delete defaults.feeStatus;
   const next: PeoplePayload = { ...defaults, ...patch };
   const sourceTracked =
     patch.feeStatus === "paid" ||
