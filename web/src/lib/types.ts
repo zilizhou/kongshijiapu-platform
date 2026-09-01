@@ -118,6 +118,8 @@ export type PeoplePayload = {
   createTime?: string;
   /** 来源待考成员 ID；终审通过后回写待考入谱状态 */
   sourceDaikaoId?: number | null;
+  /** 缴费状态；仅本平台新录入。paid=已交费，unpaid=未收费 */
+  feeStatus?: "paid" | "unpaid";
 };
 
 export type PeopleRow = {
@@ -162,6 +164,8 @@ export type PeopleRow = {
   createTime: string | null;
   /** 创建人账号标记；platform=本平台新录，空=旧谱底库 */
   createAdmin: string | null;
+  /** 缴费状态；旧谱为 null（筛选时视为已交费） */
+  feeStatus?: "paid" | "unpaid" | null;
   /** 更新时间 */
   editTime: string | null;
   childCount?: number;

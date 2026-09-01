@@ -343,6 +343,7 @@ export function daikaoToPeoplePayload(
     degree: d.degree || "",
     createTime: "",
     sourceDaikaoId: d.id,
+    feeStatus: "unpaid",
   };
 }
 

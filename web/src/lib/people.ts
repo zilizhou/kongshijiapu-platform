@@ -9,6 +9,7 @@ import {
 import { peopleToPayload } from "./people-client";
 import { LineageNode, PeoplePayload, PeopleRow } from "./types";
 import { normalizeIdCard, normalizeIdCardForStore } from "./id-card";
+import { feeStatusForInsert } from "./people-fee";
 import { normalizePhoneForStore, PEOPLE_PHONE_MAX_CHARS } from "./phone";
 
 export { peopleToPayload };
@@ -39,6 +40,7 @@ type PeopleDb = RowDataPacket & {
   F_CREATE_TIME: string | null;
   F_CREATE_ADMIN: string | null;
   F_EDIT_TIME: string | null;
+  F_FEE_STATUS?: string | null;
   F_PARENT_ID: number | null;
   F_PARENT_NAME: string | null;
   F_FATHER_ID: number | null;
@@ -98,6 +100,10 @@ function mapRow(r: PeopleDb): PeopleRow {
     degree: r.F_DEGREE ?? null,
     createTime: r.F_CREATE_TIME || null,
     createAdmin: r.F_CREATE_ADMIN || null,
+    feeStatus:
+      r.F_FEE_STATUS === "paid" || r.F_FEE_STATUS === "unpaid"
+        ? r.F_FEE_STATUS
+        : null,
     childCount: r.child_count ?? 0,
   };
 }
@@ -408,6 +414,8 @@ export async function searchPeople(opts: {
   auditStatus?: string;
   /** legacy=旧谱底库（非 platform）；platform=本平台新录 */
   dataSource?: "legacy" | "platform";
+  /** paid=已交费（含旧谱）；unpaid=未收费 */
+  feeStatus?: "paid" | "unpaid";
   page?: number;
   pageSize?: number;
 }) {
@@ -529,6 +537,16 @@ export async function searchPeople(opts: {
   } else if (opts.dataSource === "legacy") {
     where.push("(p.F_CREATE_ADMIN IS NULL OR p.F_CREATE_ADMIN = '')");
   }
+  if (opts.feeStatus === "unpaid" || opts.feeStatus === "paid") {
+    const hasFee = await ensurePeopleFeeStatusColumn();
+    if (!hasFee) {
+      if (opts.feeStatus === "unpaid") where.push("1=0");
+    } else if (opts.feeStatus === "unpaid") {
+      where.push("p.F_FEE_STATUS = 'unpaid'");
+    } else {
+      where.push("IFNULL(p.F_FEE_STATUS, 'paid') = 'paid'");
+    }
+  }
   if (keyword) {
     const variants = searchTextVariants(keyword);
     const parts: string[] = [];
@@ -632,12 +650,17 @@ export async function searchPeople(opts: {
     ? `ORDER BY (CASE WHEN IFNULL(p.F_CREATE_ADMIN,'') = 'platform' THEN 0 ELSE 1 END), p.F_ID DESC`
     : `ORDER BY p.F_ID ASC`;
 
+  const hasFeeCol = await ensurePeopleFeeStatusColumn();
+  const feeSelect = hasFeeCol
+    ? "p.F_FEE_STATUS"
+    : "NULL AS F_FEE_STATUS";
+
   // 列表不联表算父亲/子代数：先取页内行，再批量补全（避免相关子查询 × 页大小）
   const rows = await query<PeopleDb[]>(
     `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
             p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT,
-            p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME,
+            p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME, ${feeSelect},
             NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID,
             NULL AS F_SPOUSE, NULL AS F_SPOUSE_INFO, NULL AS F_DESCRIPTION, NULL AS F_VOLUME,
             NULL AS F_PHONE, NULL AS F_COMPANY, NULL AS F_POSITION, NULL AS F_PROFESSIONAL_TITLE,
@@ -1035,6 +1058,66 @@ export async function ensurePeopleIdCardColumn(): Promise<boolean> {
   }
   idCardColumnReady = true;
   return true;
+}
+
+let feeStatusColumnReady = false;
+
+export async function ensurePeopleFeeStatusColumn(): Promise<boolean> {
+  if (feeStatusColumnReady) return true;
+  const cols = await query<RowDataPacket[]>(
+    `SELECT 1 AS ok
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'tb_people'
+       AND column_name = 'F_FEE_STATUS'
+     LIMIT 1`,
+  );
+  if (!cols[0]) {
+    const ddl = `ALTER TABLE tb_people
+      ADD COLUMN F_FEE_STATUS VARCHAR(8) NULL
+      COMMENT '缴费状态 paid/unpaid，空=旧谱视为已交费'`;
+    try {
+      await execute(`${ddl}, ALGORITHM=INSTANT`);
+    } catch {
+      try {
+        await execute(ddl);
+      } catch {
+        return false;
+      }
+    }
+  }
+  try {
+    await execute(
+      `CREATE INDEX idx_people_fee_status ON tb_people (F_FEE_STATUS)`,
+    );
+  } catch {
+    /* 索引可能已存在 */
+  }
+  feeStatusColumnReady = true;
+  return true;
+}
+
+export async function updatePeopleFeeStatus(
+  id: number,
+  feeStatus: "paid" | "unpaid",
+): Promise<PeopleRow> {
+  const hasFee = await ensurePeopleFeeStatusColumn();
+  if (!hasFee) throw new Error("缴费字段尚未就绪");
+  const rows = await query<RowDataPacket[]>(
+    `SELECT F_ID, F_CREATE_ADMIN FROM tb_people WHERE F_ID = :id LIMIT 1`,
+    { id },
+  );
+  if (!rows[0]) throw new Error("未找到");
+  if ((rows[0].F_CREATE_ADMIN || "").trim() !== "platform") {
+    throw new Error("旧谱底库不登记缴费状态");
+  }
+  await execute(`UPDATE tb_people SET F_FEE_STATUS = ? WHERE F_ID = ?`, [
+    feeStatus,
+    id,
+  ]);
+  const person = await getPeopleById(id);
+  if (!person) throw new Error("未找到");
+  return person;
 }
 
 async function loadCourtesyMap(
@@ -1468,11 +1551,13 @@ export async function getPeopleById(id: number): Promise<PeopleRow | null> {
   const hasInfo = await tableExists("tb_people_info");
   const hasAncestral = await ensurePeopleAncestralHomeColumn();
   const hasIdCard = hasInfo ? await ensurePeopleIdCardColumn() : false;
+  const hasFee = await ensurePeopleFeeStatusColumn();
   const rows = await query<PeopleDb[]>(
     `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
             p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT,
             p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME,
+            ${hasFee ? "p.F_FEE_STATUS" : "NULL AS F_FEE_STATUS"},
             ${hasAncestral ? "p.F_ANCESTRAL_HOME" : "NULL AS F_ANCESTRAL_HOME"},
             ${hasRelation ? "r.F_PARENT_ID, r.F_PARENT_NAME, r.F_FATHER_ID" : "NULL AS F_PARENT_ID, NULL AS F_PARENT_NAME, NULL AS F_FATHER_ID"},
             ${
@@ -1575,10 +1660,12 @@ export async function getChildren(parentId: number) {
   const hasRelation = await tableExists("tb_people_relation");
 
   // 列表展开只需轻量字段，避免 JOIN info / 相关子查询拖慢
+  const hasFee = await ensurePeopleFeeStatusColumn();
   const liteSelect = `p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
             p.F_BIRTHDAY, p.F_DEATHDAY, p.F_ADDRESS, p.F_PINYIN, p.F_ALIAS,
             p.F_IS_HEIR, p.F_ORIGINAL_DATA, p.F_LNG_LAT,
             p.F_CREATE_TIME, p.F_CREATE_ADMIN, p.F_EDIT_TIME,
+            ${hasFee ? "p.F_FEE_STATUS" : "NULL AS F_FEE_STATUS"},
             NULL AS F_SPOUSE, NULL AS F_SPOUSE_INFO, NULL AS F_DESCRIPTION, NULL AS F_VOLUME,
             NULL AS F_PHONE, NULL AS F_COMPANY, NULL AS F_POSITION, NULL AS F_PROFESSIONAL_TITLE,
             NULL AS F_COLLEGE, NULL AS F_DEGREE,
@@ -1899,10 +1986,12 @@ async function insertPeopleRow(
   await ensurePeoplePhoneColumn();
   const hasAncestral = await ensurePeopleAncestralHomeColumn();
   const hasIdCard = await ensurePeopleIdCardColumn();
+  const hasFee = await ensurePeopleFeeStatusColumn();
   const idCard = normalizeIdCardForStore(payload.idCard);
   const zi = normalizeCourtesyPart("zi", payload.zi);
   const hao = normalizeCourtesyPart("hao", payload.hao);
   const legacyAlias = composeLegacyAlias(zi, hao, payload.alias || "");
+  const feeStatus = feeStatusForInsert(payload.feeStatus);
 
   const createTime = resolveCreateTime(payload);
   const [ins] = await conn.execute<ResultSetHeader>(
@@ -1911,10 +2000,10 @@ async function insertPeopleRow(
        F_DEATHDAY, F_EDIT_ADMIN, F_EDIT_TIME, F_FLAG, F_GROUP, F_IS_HEIR, F_LEFT, F_LEVEL, F_NAME,
        F_NO, F_RIGHT, F_SEX, F_LNG_LAT, F_ORIGINAL_DATA, F_PINYIN${
          hasAncestral ? ", F_ANCESTRAL_HOME" : ""
-       })
+       }${hasFee ? ", F_FEE_STATUS" : ""})
      VALUES (?, ?, ?, '', '', 'platform', ?,
              ?, '', '', ?, ?, ?, ?, ?, ?,
-             ?, ?, ?, ?, ?, ?${hasAncestral ? ", ?" : ""})`,
+             ?, ?, ?, ?, ?, ?${hasAncestral ? ", ?" : ""}${hasFee ? ", ?" : ""})`,
     [
       payload.address || "",
       legacyAlias,
@@ -1934,6 +2023,7 @@ async function insertPeopleRow(
       payload.originalData || "1",
       payload.pinyin || "",
       ...(hasAncestral ? [trimAncestralHome(payload.ancestralHome)] : []),
+      ...(hasFee ? [feeStatus] : []),
     ],
   );
   const id = ins.insertId;

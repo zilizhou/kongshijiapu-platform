@@ -340,6 +340,7 @@ function parseImportTable(table: string[][]): {
       college: get("毕业院校") || "",
       degree: get("学历") || "",
       no: get("谱号") || "",
+      feeStatus: "unpaid",
     };
 
     rows.push({

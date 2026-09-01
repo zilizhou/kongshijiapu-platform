@@ -180,6 +180,37 @@ export function DataSourcePill({
   );
 }
 
+/** 本平台新录入的缴费标识；旧谱不渲染 */
+export function FeeStatusPill({
+  status,
+  onToggle,
+  disabled,
+}: {
+  status: "paid" | "unpaid";
+  onToggle?: () => void;
+  disabled?: boolean;
+}) {
+  const paid = status === "paid";
+  const cls = paid
+    ? "bg-emerald-50 text-emerald-800"
+    : "bg-amber-50 text-amber-900";
+  const label = paid ? "已交费" : "未收费";
+  const className = `inline-flex shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${cls}`;
+  if (onToggle && !disabled) {
+    return (
+      <button
+        type="button"
+        title="点击切换缴费状态"
+        className={`${className} cursor-pointer hover:opacity-80`}
+        onClick={onToggle}
+      >
+        {label}
+      </button>
+    );
+  }
+  return <span className={className}>{label}</span>;
+}
+
 export function PageHeader({
   title,
   desc,

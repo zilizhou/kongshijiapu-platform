@@ -12,6 +12,7 @@ import {
   rankLabelSimplified,
 } from "@/lib/zh";
 import { parseIdCardProfile } from "@/lib/id-card";
+import { peopleFeeStatusLabel } from "@/lib/people-fee";
 import { FlexibleDateField } from "./FlexibleDateField";
 import { BranchPicker } from "./BranchPicker";
 import { PersonPicker } from "./PersonPicker";
@@ -111,6 +112,7 @@ export function PeopleForm({
   disabled,
   compareWith,
   scope = "people",
+  personId,
 }: {
   value: PeoplePayload;
   onChange: (v: PeoplePayload) => void;
@@ -119,6 +121,8 @@ export function PeopleForm({
   compareWith?: PeoplePayload | null;
   /** 待考支表单：选人/派户支只搜待考库 */
   scope?: PeopleScope;
+  /** 已落库人员：改缴费立即直写，不进三审 */
+  personId?: number | null;
 }) {
   const lastAutoPinyin = useRef("");
   const set = <K extends keyof PeoplePayload>(key: K, v: PeoplePayload[K]) =>
@@ -174,6 +178,28 @@ export function PeopleForm({
     });
   }
 
+  const showFeeStatus =
+    scope !== "daikao" &&
+    (value.feeStatus === "paid" ||
+      value.feeStatus === "unpaid" ||
+      !compareWith);
+
+  function onFeeStatusChange(next: "paid" | "unpaid") {
+    onChange({ ...value, feeStatus: next });
+    if (!personId) return;
+    void fetch(`/api/people/${personId}/fee`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feeStatus: next }),
+    }).then(async (res) => {
+      if (res.ok) return;
+      const data = await res.json().catch(() => ({}));
+      alert(
+        (data as { error?: string }).error || "更新缴费状态失败，请稍后重试",
+      );
+    });
+  }
+
   return (
     <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
       {/* 必填项置顶 */}
@@ -219,6 +245,43 @@ export function PeopleForm({
           ]}
         />
       </Field>
+      {showFeeStatus ? (
+        <Field
+          label="缴费状态"
+          changed={
+            personId
+              ? false
+              : isFieldChanged(
+                  compareWith as Record<string, unknown> | null | undefined,
+                  value as unknown as Record<string, unknown>,
+                  "feeStatus",
+                )
+          }
+          beforeText={
+            personId
+              ? undefined
+              : isFieldChanged(
+                  compareWith as Record<string, unknown> | null | undefined,
+                  value as unknown as Record<string, unknown>,
+                  "feeStatus",
+                )
+                ? peopleFeeStatusLabel(
+                    compareWith?.feeStatus === "paid" ? "paid" : "unpaid",
+                  )
+                : undefined
+          }
+        >
+          <RadioGroup
+            disabled={disabled && !personId}
+            value={value.feeStatus === "paid" ? "paid" : "unpaid"}
+            onChange={(v) => onFeeStatusChange(v === "paid" ? "paid" : "unpaid")}
+            options={[
+              { value: "unpaid", label: "未收费" },
+              { value: "paid", label: "已交费" },
+            ]}
+          />
+        </Field>
+      ) : null}
 
       <Field label="所属派户支" required {...mark("group")}>
         <BranchPicker
@@ -672,6 +735,7 @@ export const emptyPayload = (): PeoplePayload => ({
   degree: "",
   createTime: defaultCreateTime(),
   sourceDaikaoId: null,
+  feeStatus: "unpaid",
 });
 
 function defaultCreateTime(): string {

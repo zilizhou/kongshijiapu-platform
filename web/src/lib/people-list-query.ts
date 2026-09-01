@@ -15,6 +15,7 @@ export type PeopleListQuery = {
   idCard: string;
   auditStatus: string;
   dataSource: string;
+  feeStatus: string;
   page: number;
   pageSize: number;
 };
@@ -34,6 +35,7 @@ export const emptyPeopleListQuery = (): PeopleListQuery => ({
   idCard: "",
   auditStatus: "",
   dataSource: "",
+  feeStatus: "",
   page: 1,
   pageSize: 10,
 });
@@ -56,6 +58,7 @@ export function buildPeopleListSearch(q: PeopleListQuery): string {
   if (q.idCard) sp.set("idCard", q.idCard);
   if (q.auditStatus) sp.set("auditStatus", q.auditStatus);
   if (q.dataSource) sp.set("dataSource", q.dataSource);
+  if (q.feeStatus) sp.set("feeStatus", q.feeStatus);
   if (q.page > 1) sp.set("page", String(q.page));
   if (q.pageSize !== 10) sp.set("pageSize", String(q.pageSize));
   return sp.toString();
@@ -83,6 +86,7 @@ export function parsePeopleListSearch(
     idCard: params.get("idCard") || "",
     auditStatus: params.get("auditStatus") || "",
     dataSource: params.get("dataSource") || "",
+    feeStatus: params.get("feeStatus") || "",
     page: Number.isFinite(page) && page > 0 ? page : 1,
     pageSize: Number.isFinite(pageSize) && pageSize > 0 ? pageSize : 10,
   };
@@ -121,7 +125,8 @@ export function hasPeopleListFilters(q: PeopleListQuery): boolean {
       q.address ||
       q.idCard ||
       q.auditStatus ||
-      q.dataSource,
+      q.dataSource ||
+      q.feeStatus,
   );
 }
 

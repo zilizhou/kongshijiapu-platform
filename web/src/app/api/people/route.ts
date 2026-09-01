@@ -27,6 +27,10 @@ export async function GET(req: NextRequest) {
         sp.get("dataSource") === "legacy" || sp.get("dataSource") === "platform"
           ? (sp.get("dataSource") as "legacy" | "platform")
           : undefined,
+      feeStatus:
+        sp.get("feeStatus") === "paid" || sp.get("feeStatus") === "unpaid"
+          ? (sp.get("feeStatus") as "paid" | "unpaid")
+          : undefined,
       page: sp.get("page") ? Number(sp.get("page")) : 1,
       pageSize: sp.get("pageSize") ? Number(sp.get("pageSize")) : 10,
     });

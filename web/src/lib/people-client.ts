@@ -1,4 +1,5 @@
 import { extractCourtesyFromDescription } from "./courtesy";
+import { displayFeeStatus } from "./people-fee";
 import { formatPhones, parsePhones } from "./phone";
 import type { PeoplePayload, PeopleRow } from "./types";
 import { parseRankToIndex, rankLabelSimplified } from "./zh";
@@ -58,6 +59,7 @@ export function peopleToPayload(p: PeopleRow): PeoplePayload {
     siblingOrder != null
       ? rankLabelSimplified(sex, siblingOrder)
       : p.rank || "";
+  const feeStatus = displayFeeStatus(p);
 
   return {
     name: p.name,
@@ -95,5 +97,6 @@ export function peopleToPayload(p: PeopleRow): PeoplePayload {
     college: p.college || "",
     degree: p.degree || "",
     createTime: p.createTime || "",
+    ...(feeStatus ? { feeStatus } : {}),
   };
 }

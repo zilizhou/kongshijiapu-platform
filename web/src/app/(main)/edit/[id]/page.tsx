@@ -252,6 +252,11 @@ export default function EditDetailPage() {
               disabled={!editable || item.operation === "delete"}
               compareWith={item.beforeSnapshot as PeoplePayload | null}
               scope={item.objectType === "daikao" ? "daikao" : "people"}
+              personId={
+                item.objectType === "people" && item.operation === "update"
+                  ? item.objectId
+                  : null
+              }
             />
           )}
           <div className="mt-8 border-t border-line pt-4">

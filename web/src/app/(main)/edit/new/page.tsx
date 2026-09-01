@@ -248,6 +248,7 @@ function NewEditInner() {
                 value={payload}
                 onChange={setPayload}
                 scope={isAdmit ? "people" : isDaikaoEdit ? "daikao" : "people"}
+                personId={op === "update" ? objectId : null}
               />
             </>
           )}

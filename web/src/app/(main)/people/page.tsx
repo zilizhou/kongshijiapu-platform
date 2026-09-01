@@ -22,6 +22,7 @@ import {
   peopleDataSourceLabel,
   resolvePeopleDataSource,
 } from "@/lib/people-source";
+import { displayFeeStatus, peopleFeeStatusLabel } from "@/lib/people-fee";
 import { BranchPicker } from "@/components/BranchPicker";
 import { PeopleImportDialog } from "@/components/PeopleImportDialog";
 import { StructuredTextFillDialog } from "@/components/StructuredTextFillDialog";
@@ -30,6 +31,7 @@ import {
   Button,
   Card,
   DataSourcePill,
+  FeeStatusPill,
   FilterBar,
   FilterField,
   Input,
@@ -127,6 +129,7 @@ export default function PeoplePage() {
   const [filters, setFilters] = useState<PeopleFilters>(emptyFilters);
   const [auditStatus, setAuditStatus] = useState("");
   const [dataSource, setDataSource] = useState("");
+  const [feeStatus, setFeeStatus] = useState("");
   const [moreFilters, setMoreFilters] = useState(false);
   const [operable, setOperable] = useState(true);
   const [page, setPage] = useState(1);
@@ -183,6 +186,7 @@ export default function PeoplePage() {
       });
       setAuditStatus(q0.auditStatus);
       setDataSource(q0.dataSource);
+      setFeeStatus(q0.feeStatus);
       setPage(q0.page);
       setPageSize(q0.pageSize);
       if (needsMoreFilters(q0)) setMoreFilters(true);
@@ -244,6 +248,9 @@ export default function PeoplePage() {
     if (dataSource === "legacy" || dataSource === "platform") {
       sp.set("dataSource", dataSource);
     }
+    if (feeStatus === "paid" || feeStatus === "unpaid") {
+      sp.set("feeStatus", feeStatus);
+    }
     try {
       const res = await fetch(`/api/people?${sp}`, { signal: ac.signal });
       const data = await res.json();
@@ -259,7 +266,7 @@ export default function PeoplePage() {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [page, pageSize, filters, auditStatus, dataSource]);
+  }, [page, pageSize, filters, auditStatus, dataSource, feeStatus]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -273,11 +280,12 @@ export default function PeoplePage() {
         ...filters,
         auditStatus,
         dataSource,
+        feeStatus,
         page,
         pageSize,
       }),
     );
-  }, [hydrated, filters, auditStatus, dataSource, page, pageSize]);
+  }, [hydrated, filters, auditStatus, dataSource, feeStatus, page, pageSize]);
 
   function applySearch(next: PeopleFilters = {
     name,
@@ -312,6 +320,7 @@ export default function PeoplePage() {
     setIdCard("");
     setAuditStatus("");
     setDataSource("");
+    setFeeStatus("");
     savePeopleListQuery("");
     applySearch(emptyFilters);
   }
@@ -375,6 +384,59 @@ export default function PeoplePage() {
 
   const canEdit = user?.role === "editor" || user?.role === "admin";
   const pages = Math.max(1, Math.ceil(total / pageSize));
+
+  function patchPersonFee(id: number, nextFee: "paid" | "unpaid") {
+    setItems((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, feeStatus: nextFee } : p)),
+    );
+    setExpanded((prev) => {
+      const out: Record<number, PeopleRow[]> = {};
+      for (const [k, kids] of Object.entries(prev)) {
+        out[Number(k)] = kids.map((c) =>
+          c.id === id ? { ...c, feeStatus: nextFee } : c,
+        );
+      }
+      return out;
+    });
+    setDrawer((d) => (d?.id === id ? { ...d, feeStatus: nextFee } : d));
+  }
+
+  async function toggleFee(person: PeopleRow) {
+    const shown = displayFeeStatus(person);
+    if (!shown) return;
+    const next = shown === "paid" ? "unpaid" : "paid";
+    const res = await fetch(`/api/people/${person.id}/fee`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feeStatus: next }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "更新缴费状态失败");
+      return;
+    }
+    const saved = (data.person as PeopleRow | undefined)?.feeStatus || next;
+    if (feeStatus === "unpaid" || feeStatus === "paid") {
+      load();
+      if (drawer?.id === person.id) {
+        setDrawer((d) => (d ? { ...d, feeStatus: saved } : d));
+      }
+      return;
+    }
+    patchPersonFee(person.id, saved);
+  }
+
+  function renderFeeCell(person: PeopleRow) {
+    const shown = displayFeeStatus(person);
+    if (!shown) return null;
+    return (
+      <FeeStatusPill
+        status={shown}
+        disabled={!canEdit}
+        onToggle={canEdit ? () => toggleFee(person) : undefined}
+      />
+    );
+  }
 
   async function openDrawer(p: PeopleRow) {
     setDrawer(p);
@@ -572,6 +634,20 @@ export default function PeoplePage() {
             <option value="platform">新录入</option>
           </Select>
         </FilterField>
+        <FilterField className="w-32">
+          <Select
+            compact
+            value={feeStatus}
+            onChange={(e) => {
+              setFeeStatus(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">缴费状态</option>
+            <option value="paid">已交费</option>
+            <option value="unpaid">未收费</option>
+          </Select>
+        </FilterField>
         {moreFilters ? (
           <>
             <FilterField className="w-32">
@@ -672,12 +748,13 @@ export default function PeoplePage() {
         </div>
 
         <TableScroll>
-          <table className="min-w-[1100px] w-full text-sm">
+          <table className="min-w-[1180px] w-full text-sm">
             <thead className={tableHeadClass}>
               <tr>
                 <th className="px-3 py-3 font-medium">序号</th>
                 <th className="px-3 py-3 font-medium">姓名</th>
                 <th className="px-3 py-3 font-medium">来源</th>
+                <th className="px-3 py-3 font-medium">缴费</th>
                 <th className="px-3 py-3 font-medium">父亲</th>
                 <th className="px-3 py-3 font-medium">性别</th>
                 <th className="px-3 py-3 font-medium">代数</th>
@@ -693,13 +770,13 @@ export default function PeoplePage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="px-3 py-10 text-center text-muted" colSpan={13}>
+                  <td className="px-3 py-10 text-center text-muted" colSpan={14}>
                     加载中...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-10 text-center text-muted" colSpan={13}>
+                  <td className="px-3 py-10 text-center text-muted" colSpan={14}>
                     无结果
                   </td>
                 </tr>
@@ -727,6 +804,7 @@ export default function PeoplePage() {
                           title={peopleDataSourceHint(src)}
                         />
                       </td>
+                      <td className="px-3 py-3">{renderFeeCell(p)}</td>
                       <td className="px-3 py-3">{dash(p.parentName)}</td>
                       <td className="px-3 py-3">{p.sex}</td>
                       <td className="px-3 py-3">{p.level ?? "-"}</td>
@@ -791,6 +869,7 @@ export default function PeoplePage() {
                             title={peopleDataSourceHint(cSrc)}
                           />
                         </td>
+                        <td className="px-3 py-2">{renderFeeCell(c)}</td>
                         <td className="px-3 py-2">{dash(c.parentName)}</td>
                         <td className="px-3 py-2">{c.sex}</td>
                         <td className="px-3 py-2">{c.level ?? "-"}</td>
@@ -882,7 +961,10 @@ export default function PeoplePage() {
             </div>
             <dl className="space-y-3 text-sm">
               {[
-                ["所属派户支", formatGroup(drawer.groupName)],
+                [
+                  "所属派户支",
+                  formatGroup(drawer.groupName),
+                ],
                 ["谱号", drawer.no],
                 ["父名", drawer.parentName],
                 ["地址", drawer.address],
@@ -896,6 +978,14 @@ export default function PeoplePage() {
                   "数据来源",
                   peopleDataSourceLabel(resolvePeopleDataSource(drawer)),
                 ],
+                ...(displayFeeStatus(drawer)
+                  ? ([
+                      [
+                        "缴费状态",
+                        peopleFeeStatusLabel(displayFeeStatus(drawer)!),
+                      ],
+                    ] as [string, string][])
+                  : []),
                 ["录入时间", drawer.createTime],
                 ["更新时间", drawer.editTime],
                 ["卷次", drawer.volume],

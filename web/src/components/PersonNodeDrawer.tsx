@@ -8,6 +8,7 @@ import {
   peopleDataSourceLabel,
   resolvePeopleDataSource,
 } from "@/lib/people-source";
+import { displayFeeStatus, peopleFeeStatusLabel } from "@/lib/people-fee";
 import { PeoplePayload, PeopleRow } from "@/lib/types";
 import type { PeopleScope } from "@/lib/people-scope";
 import { objectTypeOf, personApi } from "@/lib/people-scope";
@@ -228,9 +229,15 @@ export function PersonNodeDrawer({
           ) : editing && payload ? (
             <PeopleForm
               value={payload}
-              onChange={setPayload}
+              onChange={(v) => {
+                setPayload(v);
+                if (person && v.feeStatus && v.feeStatus !== person.feeStatus) {
+                  setPerson({ ...person, feeStatus: v.feeStatus });
+                }
+              }}
               compareWith={baseline}
               scope={scope}
+              personId={scope === "people" ? person?.id : null}
             />
           ) : person ? (
             <dl className="space-y-3 text-sm">
@@ -261,9 +268,17 @@ export function PersonNodeDrawer({
                     "数据来源",
                     peopleDataSourceLabel(resolvePeopleDataSource(person)),
                   ],
+                  ...(displayFeeStatus(person)
+                    ? [
+                        [
+                          "缴费状态",
+                          peopleFeeStatusLabel(displayFeeStatus(person)!),
+                        ],
+                      ]
+                    : []),
                   ["录入时间", person.createTime],
                   ["更新时间", person.editTime],
-                ] as const
+                ] as [string, string | null | undefined][]
               ).map(([k, v]) => (
                 <div key={k}>
                   <dt className="text-xs text-muted">{k}</dt>
