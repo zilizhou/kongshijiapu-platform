@@ -7,7 +7,7 @@ import {
   getPeopleById,
 } from "./people";
 import { PeopleRow } from "./types";
-import { likeOrClause } from "./zh";
+import { likeOrClause, toTraditional } from "./zh";
 
 export type PublishEntry = {
   id: number;
@@ -153,6 +153,19 @@ export function trimPublishAddress(raw: string | null | undefined): string {
   return s;
 }
 
+/** 用于判断是否同一住址（简繁、空白视为相同） */
+export function publishAddressKey(raw: string | null | undefined): string {
+  return toTraditional(trimPublishAddress(raw));
+}
+
+/**
+ * 连续相同住址只在该段最后一人印「以上住…」。
+ * keys[i] 为空表示此人无住址，会打断连续段。
+ */
+export function markPrintableAddressFlags(keys: string[]): boolean[] {
+  return keys.map((key, i) => Boolean(key) && key !== keys[i + 1]);
+}
+
 /**
  * 姓名正下方小字：生年 → 妻 → 子N+名 → 住址
  * 例：一九六五年生妻惠氏子三德成德伦德林以上住水城民主村
@@ -160,6 +173,7 @@ export function trimPublishAddress(raw: string | null | undefined): string {
 export function composePublishBio(
   p: PeopleRow,
   children: ChildRef[] = [],
+  includeAddress = true,
 ): string {
   const parts: string[] = [];
 
@@ -180,9 +194,11 @@ export function composePublishBio(
     parts.push(`子${cnCount(sons.length)}${sons.join("")}`);
   }
 
-  const address = trimPublishAddress(p.address);
-  if (address) {
-    parts.push(`以上住${address}`);
+  if (includeAddress) {
+    const address = trimPublishAddress(p.address);
+    if (address) {
+      parts.push(`以上住${address}`);
+    }
   }
 
   return parts.join("");
@@ -192,6 +208,7 @@ function toEntry(
   p: PeopleRow,
   children: ChildRef[] = [],
   isFocus = false,
+  includeAddress = true,
 ): PublishEntry {
   return {
     id: p.id,
@@ -199,7 +216,7 @@ function toEntry(
     sex: p.sex,
     level: p.level,
     rank: p.rank || null,
-    bio: composePublishBio(p, children),
+    bio: composePublishBio(p, children, includeAddress),
     isFocus,
   };
 }
@@ -216,7 +233,8 @@ function groupByLevel(
     byLevel.get(lv)!.push(p);
   }
   const levels = [...byLevel.keys()].sort((a, b) => a - b);
-  return levels.map((lv) => {
+  const ordered: PeopleRow[] = [];
+  for (const lv of levels) {
     const rows = byLevel.get(lv)!;
     rows.sort((a, b) => {
       const ao = a.siblingOrder ?? 999;
@@ -224,12 +242,23 @@ function groupByLevel(
       if (ao !== bo) return ao - bo;
       return a.id - b.id;
     });
+    ordered.push(...rows);
+  }
+
+  // 按出版阅读顺序（世代升序、同世排行）合并连续同址：只在该段最后一人印「以上住…」
+  const addrKeys = ordered.map((p) => publishAddressKey(p.address));
+  const printAddr = markPrintableAddressFlags(addrKeys);
+  const entries = ordered.map((p, i) =>
+    toEntry(p, childMap.get(p.id) || [], focusId === p.id, printAddr[i]),
+  );
+  const byId = new Map(entries.map((e) => [e.id, e]));
+
+  return levels.map((lv) => {
+    const rows = byLevel.get(lv)!;
     return {
       level: lv < 0 ? null : lv,
       label: lv < 0 ? "世次未详" : `第${lv}世`,
-      entries: rows.map((p) =>
-        toEntry(p, childMap.get(p.id) || [], focusId === p.id),
-      ),
+      entries: rows.map((p) => byId.get(p.id)!),
     };
   });
 }
