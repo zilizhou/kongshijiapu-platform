@@ -28,6 +28,8 @@ import {
 } from "@/lib/publishType";
 
 type FlatEntry = PublishEntry & { genLabel: string };
+/** 一页若干列，每列若干人 */
+type PageColumns = FlatEntry[][];
 
 function flattenEntries(data: PublishPayload): FlatEntry[] {
   return data.generations.flatMap((g) =>
@@ -64,7 +66,7 @@ function PersonStrip({ entry }: { entry: FlatEntry | PublishEntry }) {
 
 /**
  * 竖排装箱：同一列内自上而下接排；列满后向左开新列；页宽用尽换页。
- * 每人不可拆列（整块迁到下一列/页）。
+ * 每人不可拆列（整块迁到下一列/页）。返回 页 → 列 → 人。
  */
 function packPages(
   items: FlatEntry[],
@@ -73,63 +75,82 @@ function packPages(
   pageWidth: number,
   pageHeight: number,
   gapPx: number,
-): FlatEntry[][] {
+): PageColumns[] {
   if (!items.length) return [[]];
   const limitW = Math.max(40, pageWidth - 20);
   const limitH = Math.max(40, pageHeight - 4);
   const colW = Math.max(18, personWidth + 2);
   const maxCols = Math.max(1, Math.floor(limitW / colW));
 
-  const pages: FlatEntry[][] = [];
+  const pages: PageColumns[] = [];
   let i = 0;
 
   while (i < items.length) {
-    const start = i;
-    let cols = 0;
+    const page: PageColumns = [];
+    let col: FlatEntry[] = [];
     let colH = 0;
+
+    const flushCol = () => {
+      if (col.length) {
+        page.push(col);
+        col = [];
+        colH = 0;
+      }
+    };
 
     while (i < items.length) {
       const h = Math.max(12, heights[i] || 24);
-      const need = colH > 0 ? colH + gapPx + h : h;
+      const need = col.length > 0 ? colH + gapPx + h : h;
 
-      if (cols === 0) {
-        cols = 1;
+      if (page.length === 0 && col.length === 0) {
         if (h > limitH) {
+          page.push([items[i]]);
           i += 1;
           break;
         }
+        col.push(items[i]);
         colH = h;
         i += 1;
         continue;
       }
 
-      if (need <= limitH) {
+      if (col.length > 0 && need <= limitH) {
+        col.push(items[i]);
         colH = need;
         i += 1;
         continue;
       }
 
-      if (cols >= maxCols) {
+      const colsStarted = page.length + (col.length ? 1 : 0);
+      if (colsStarted >= maxCols) {
         break;
       }
-      cols += 1;
+      flushCol();
       if (h > limitH) {
+        page.push([items[i]]);
         i += 1;
         break;
       }
+      col.push(items[i]);
       colH = h;
       i += 1;
     }
 
-    if (i === start) i += 1;
-    pages.push(items.slice(start, i));
+    flushCol();
+    if (!page.length) {
+      page.push([items[i]]);
+      i += 1;
+    }
+    pages.push(page);
   }
 
-  return pages.length ? pages : [items];
+  return pages.length ? pages : [[]];
 }
 
-function pagesSignature(pages: FlatEntry[][]): string {
-  return pages.map((p) => p.map((e) => e.id).join(",")).join("|");
+function pagesSignature(pages: PageColumns[]): string {
+  return pages
+    .map((cols) => cols.map((c) => c.map((e) => e.id).join(",")).join("/"))
+    .join("|");
 }
 
 function computePreviewScale(paper: PaperSize): number {
@@ -145,14 +166,14 @@ function PageSheet({
   title,
   pageIndex,
   pageCount,
-  entries,
+  columns,
   paperTag,
   showLabel,
 }: {
   title: string;
   pageIndex: number;
   pageCount: number;
-  entries: FlatEntry[];
+  columns: PageColumns;
   paperTag: string;
   showLabel?: boolean;
 }) {
@@ -167,8 +188,22 @@ function PageSheet({
         </aside>
         <div className="publish-frame">
           <div className="publish-body publish-body-paged">
-            {entries.map((entry) => (
-              <PersonStrip key={`${pageIndex}-${entry.id}`} entry={entry} />
+            {columns.map((col, ci) => (
+              <div
+                key={`${pageIndex}-col-${ci}`}
+                className={
+                  col.length < 2
+                    ? "publish-col publish-col-single"
+                    : "publish-col"
+                }
+              >
+                {col.map((entry) => (
+                  <PersonStrip
+                    key={`${pageIndex}-${entry.id}`}
+                    entry={entry}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         </div>
@@ -199,7 +234,7 @@ export function PublishSheet({
   const measureRef = useRef<HTMLDivElement>(null);
   const widthProbeRef = useRef<HTMLDivElement>(null);
   const pagesSigRef = useRef("");
-  const [pages, setPages] = useState<FlatEntry[][]>([]);
+  const [pages, setPages] = useState<PageColumns[]>([]);
   const [previewScale, setPreviewScale] = useState(0.55);
   const [pageIndex, setPageIndex] = useState(0);
   const paperKey = `${paper.widthMm}x${paper.heightMm}`;
@@ -238,7 +273,7 @@ export function PublishSheet({
       const probe = widthProbeRef.current;
       const box = measureRef.current;
       if (!probe || !box) {
-        const fallback = [flat];
+        const fallback: PageColumns[] = [[flat]];
         const sig = pagesSignature(fallback);
         if (sig !== pagesSigRef.current) {
           pagesSigRef.current = sig;
@@ -320,7 +355,7 @@ export function PublishSheet({
     };
   }, [flat, layoutKey, paper]);
 
-  const displayPages = pages.length ? pages : flat.length ? [flat] : [];
+  const displayPages = pages.length ? pages : flat.length ? [[flat]] : [];
   const pageCount = Math.max(1, displayPages.length);
 
   useEffect(() => {
@@ -373,7 +408,7 @@ export function PublishSheet({
 
   const paperTag = `${paper.label} ${paper.widthMm}×${paper.heightMm}mm`;
   const safeIndex = Math.min(pageIndex, pageCount - 1);
-  const currentEntries = displayPages[safeIndex] || [];
+  const currentColumns = displayPages[safeIndex] || [];
 
   return (
     <div className="publish-root flex min-h-0 flex-1 flex-col" style={rootStyle}>
@@ -427,7 +462,7 @@ export function PublishSheet({
               title={data.title}
               pageIndex={safeIndex}
               pageCount={pageCount}
-              entries={currentEntries}
+              columns={currentColumns}
               paperTag={paperTag}
               showLabel
             />
@@ -490,13 +525,13 @@ export function PublishSheet({
 
       {/* 打印：全部页（屏上隐藏） */}
       <div className="publish-pages publish-print-stack" aria-hidden>
-        {displayPages.map((pageEntries, idx) => (
+        {displayPages.map((pageColumns, idx) => (
           <PageSheet
             key={`print-${idx}-${layoutKey}`}
             title={data.title}
             pageIndex={idx}
             pageCount={pageCount}
-            entries={pageEntries}
+            columns={pageColumns}
             paperTag={paperTag}
           />
         ))}

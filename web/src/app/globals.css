@@ -243,6 +243,8 @@ h3,
   min-height: 0;
   padding: 0.75rem 0.85rem 0.9rem;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 隐藏测量层：按 1:1 真实纸张尺寸测量（不缩放） */
@@ -279,8 +281,38 @@ h3,
 }
 
 .publish-body-paged {
+  writing-mode: horizontal-tb;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: stretch;
+  justify-content: flex-start;
+  flex: 1 1 auto;
   width: 100%;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+/* 列内两端对齐：只拉人与人之间的空隙，不拉姓名/小传 */
+.publish-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.9em;
+  height: 100%;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.publish-col-single {
+  justify-content: flex-start;
+}
+
+.publish-col .publish-person {
+  display: block;
+  flex: 0 0 auto;
+  /* 最小间距改由列 gap 承担，避免与 space-between 叠成双倍 */
+  margin-block-end: 0;
 }
 
 /*
@@ -452,9 +484,20 @@ h3,
   .publish-frame {
     overflow: hidden !important;
     height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
   }
 
   .publish-body {
+    height: 100% !important;
+  }
+
+  .publish-body-paged {
+    height: 100% !important;
+    flex: 1 1 auto !important;
+  }
+
+  .publish-col {
     height: 100% !important;
   }
 }
