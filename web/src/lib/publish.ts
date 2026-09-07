@@ -65,7 +65,57 @@ export type PublishPayload = {
   generations: PublishGeneration[];
   total: number;
   focusId?: number;
+  /** 派户支命中总数（可能大于本刊收录） */
+  matchedTotal?: number;
+  /** 本刊从第几人起（0 起） */
+  offset?: number;
+  /** 因单次上限被截断 */
+  truncated?: boolean;
 };
+
+/** 单次按派户支收录上限，避免「全部」把请求/浏览器撑死 */
+export const PUBLISH_BRANCH_MAX = 2000;
+/** 点打印时再拉全量的单次上限（预览仍用较少人数） */
+export const PUBLISH_PRINT_MAX = 4000;
+
+export function mergePublishPayloads(parts: PublishPayload[]): PublishPayload {
+  if (parts.length === 1) return parts[0];
+  const first = parts[0];
+  const byLevel = new Map<number | null, PublishEntry[]>();
+  const labels = new Map<number | null, string>();
+  const seen = new Set<number>();
+  for (const part of parts) {
+    for (const g of part.generations) {
+      labels.set(g.level, g.label);
+      const list = byLevel.get(g.level) || [];
+      for (const e of g.entries) {
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
+        list.push(e);
+      }
+      byLevel.set(g.level, list);
+    }
+  }
+  const generations = [...byLevel.entries()]
+    .sort((a, b) => (a[0] ?? 9999) - (b[0] ?? 9999))
+    .map(([level, entries]) => ({
+      level,
+      label: labels.get(level) || (level == null ? "世次未详" : `第${level}世`),
+      entries,
+    }));
+  const total = generations.reduce((n, g) => n + g.entries.length, 0);
+  const matched = first.matchedTotal ?? total;
+  const offset = first.offset ?? 0;
+  return {
+    ...first,
+    generations,
+    total,
+    matchedTotal: matched,
+    offset,
+    truncated: offset + total < matched,
+    subtitle: `派户支「${first.subtitle.match(/「([^」]+)」/)?.[1] || ""}」· 匹配 ${matched} 人 · 本刊收录 ${total} 人`,
+  };
+}
 
 async function tableExists(name: string): Promise<boolean> {
   const rows = await query<RowDataPacket[]>(
@@ -297,8 +347,8 @@ async function loadChildMap(
   if (!unique.length) return map;
   if (!(await tableExists("tb_people_relation"))) return map;
 
-  for (let i = 0; i < unique.length; i += 80) {
-    const chunk = unique.slice(i, i + 80);
+  for (let i = 0; i < unique.length; i += 400) {
+    const chunk = unique.slice(i, i + 400);
     const ph = chunk.map(() => "?").join(",");
     const rows = await query<RowDataPacket[]>(
       `SELECT r.F_PARENT_ID, p.F_NAME, p.F_SEX
@@ -328,8 +378,8 @@ async function hydratePeople(ids: number[]): Promise<Map<number, PeopleRow>> {
   const hasInfo = await tableExists("tb_people_info");
   const hasRelation = await tableExists("tb_people_relation");
   // 分批，避免 IN 过长
-  for (let i = 0; i < unique.length; i += 80) {
-    const chunk = unique.slice(i, i + 80);
+  for (let i = 0; i < unique.length; i += 400) {
+    const chunk = unique.slice(i, i + 400);
     const ph = chunk.map(() => "?").join(",");
     const rows = await query<RowDataPacket[]>(
       `SELECT p.F_ID, p.F_NAME, p.F_SEX, p.F_NO, p.F_LEVEL, p.F_GROUP,
@@ -449,6 +499,8 @@ export async function buildPublishByPerson(
 export async function buildPublishByBranch(
   group: string,
   limit: number | "all" = 100,
+  offset = 0,
+  countOnly = false,
 ): Promise<PublishPayload> {
   const g = group.trim();
   const variants = await resolvePeopleGroupPatterns(g);
@@ -459,11 +511,16 @@ export async function buildPublishByBranch(
       subtitle: `派户支「${g}」· 共 0 人`,
       generations: [],
       total: 0,
+      matchedTotal: 0,
+      offset: 0,
     };
   }
 
-  const take =
-    limit === "all" ? null : Math.max(1, Math.floor(limit));
+  const skip = Math.max(0, Math.floor(Number(offset) || 0));
+  const want =
+    limit === "all"
+      ? PUBLISH_BRANCH_MAX
+      : Math.min(PUBLISH_BRANCH_MAX, Math.max(1, Math.floor(limit)));
 
   const params: Record<string, unknown> = {};
   const groupClause = likeOrClause(
@@ -479,12 +536,24 @@ export async function buildPublishByBranch(
   );
   const matchedTotal = Number(countRows[0]?.c || 0);
 
+  if (countOnly) {
+    return {
+      mode: "branch",
+      title: formatGroupTitle(g),
+      subtitle: `派户支「${g}」· 匹配 ${matchedTotal} 人`,
+      generations: [],
+      total: matchedTotal,
+      matchedTotal,
+      offset: skip,
+    };
+  }
+
   const idRows = await query<RowDataPacket[]>(
     `SELECT p.F_ID
      FROM tb_people p
      WHERE ${groupClause}
      ORDER BY p.F_LEVEL IS NULL, p.F_LEVEL ASC, p.F_LEFT ASC, p.F_ID ASC
-     ${take != null ? `LIMIT ${take}` : ""}`,
+     LIMIT ${want} OFFSET ${skip}`,
     params,
   );
   const ids = idRows.map((r) => Number(r.F_ID));
@@ -494,14 +563,24 @@ export async function buildPublishByBranch(
     .filter((p): p is PeopleRow => Boolean(p));
 
   const childMap = await loadChildMap(people.map((p) => p.id));
+  const truncated = skip + people.length < matchedTotal || want < matchedTotal;
+  const from = people.length ? skip + 1 : 0;
+  const to = skip + people.length;
+  const rangeLabel =
+    matchedTotal > people.length || skip > 0
+      ? `第 ${from}–${to} 人`
+      : limit === "all"
+        ? "全部"
+        : `前 ${people.length} 人`;
 
-  const limitLabel =
-    limit === "all" ? "全部" : `前 ${people.length} 人`;
   return {
     mode: "branch",
     title: formatGroupTitle(g),
-    subtitle: `派户支「${g}」· 匹配 ${matchedTotal} 人 · 本刊收录 ${people.length} 人（${limitLabel}）`,
+    subtitle: `派户支「${g}」· 匹配 ${matchedTotal} 人 · 本刊收录 ${people.length} 人（${rangeLabel}）`,
     generations: groupByLevel(people, childMap),
     total: people.length,
+    matchedTotal,
+    offset: skip,
+    truncated,
   };
 }

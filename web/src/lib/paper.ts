@@ -135,5 +135,19 @@ html, body {
   page-break-after: auto !important;
   break-after: auto !important;
 }
+.publish-frame,
+.publish-body-paged,
+.publish-col {
+  height: 100% !important;
+}
+.publish-body-paged {
+  writing-mode: horizontal-tb !important;
+  display: flex !important;
+  flex-direction: row-reverse !important;
+}
+.publish-col {
+  display: flex !important;
+  flex-direction: column !important;
+}
 `.trim();
 }

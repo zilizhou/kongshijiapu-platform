@@ -140,15 +140,28 @@ h3,
   gap: 1.5rem;
 }
 
-/* 屏显仅翻页预览；全页栈专供打印 */
-.publish-print-stack {
-  position: absolute;
-  left: -10000px;
-  top: 0;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  pointer-events: none;
+/* 屏显仅翻页预览；全页栈专供打印。必须保留真实纸张尺寸，
+ * 否则 Chrome 出 PDF 时列高按 0 算，字会叠在一起。 */
+@media screen {
+  .publish-print-stack {
+    position: absolute;
+    left: -10000px;
+    top: 0;
+    width: var(--pub-page-w);
+    height: auto;
+    overflow: hidden;
+    pointer-events: none;
+    visibility: hidden;
+  }
+
+  .publish-print-stack .publish-page-outer {
+    width: var(--pub-page-w);
+    height: var(--pub-page-h);
+  }
+
+  .publish-print-stack .publish-page {
+    transform: none;
+  }
 }
 
 .publish-flip-stage .publish-page-outer {
@@ -410,19 +423,9 @@ h3,
     overflow: visible !important;
   }
 
-  body * {
-    visibility: hidden !important;
-  }
-
-  .publish-root,
-  .publish-root * {
-    visibility: visible !important;
-  }
-
   .no-print,
   .no-print * {
     display: none !important;
-    visibility: hidden !important;
   }
 
   .app-shell-aside,
@@ -434,7 +437,6 @@ h3,
   .publish-flip,
   .publish-page-label {
     display: none !important;
-    visibility: hidden !important;
   }
 
   main {
@@ -454,6 +456,10 @@ h3,
     max-height: none !important;
   }
 
+  .publish-root {
+    --pub-preview-scale: 1 !important;
+  }
+
   .publish-pages,
   .publish-print-stack {
     position: static !important;
@@ -466,26 +472,36 @@ h3,
     gap: 0 !important;
     align-items: stretch !important;
     pointer-events: auto !important;
+    visibility: visible !important;
   }
 
   .publish-page-outer {
     box-shadow: none !important;
     overflow: hidden !important;
+    width: var(--pub-page-w) !important;
+    height: var(--pub-page-h) !important;
+    visibility: visible !important;
   }
 
   .publish-page {
-    visibility: visible !important;
     box-shadow: none !important;
     border: 1px solid #c45c4a;
     transform: none !important;
     overflow: hidden !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    width: var(--pub-page-w) !important;
+    height: var(--pub-page-h) !important;
   }
 
   .publish-frame {
     overflow: hidden !important;
-    height: 100% !important;
     display: flex !important;
     flex-direction: column !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    flex: 1 1 auto !important;
   }
 
   .publish-body {
@@ -493,11 +509,33 @@ h3,
   }
 
   .publish-body-paged {
+    writing-mode: horizontal-tb !important;
+    display: flex !important;
+    flex-direction: row-reverse !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
     height: 100% !important;
+    width: 100% !important;
     flex: 1 1 auto !important;
+    min-height: 0 !important;
   }
 
   .publish-col {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
     height: 100% !important;
+    min-height: 0 !important;
+    flex: 0 0 auto !important;
+  }
+
+  .publish-col-single {
+    justify-content: flex-start !important;
+  }
+
+  .publish-col .publish-person {
+    display: block !important;
+    flex: 0 0 auto !important;
+    margin-block-end: 0 !important;
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BranchPicker } from "@/components/BranchPicker";
 import { PublishSheet } from "@/components/PublishSheet";
 import {
@@ -20,7 +20,12 @@ import {
   resolvePaperSize,
   type PaperPresetId,
 } from "@/lib/paper";
-import type { PublishPayload } from "@/lib/publish";
+import {
+  mergePublishPayloads,
+  PUBLISH_BRANCH_MAX,
+  PUBLISH_PRINT_MAX,
+  type PublishPayload,
+} from "@/lib/publish";
 import {
   clampDetailRem,
   clampNameRatio,
@@ -225,6 +230,9 @@ export default function PublishPage() {
     "100",
   );
   const [customLimit, setCustomLimit] = useState("400");
+  /** 按派户支：从第几人起（1 起，给大派分段） */
+  const [branchStart, setBranchStart] = useState("1");
+  const [branchMatch, setBranchMatch] = useState<number | null>(null);
   /** 出版物纸张：预设或自定义毫米尺寸（仅影响排版，不重新查库） */
   const [paperPreset, setPaperPreset] = useState<PaperPresetId>("A4");
   const [customPaperW, setCustomPaperW] = useState(String(DEFAULT_PAPER.widthMm));
@@ -255,6 +263,12 @@ export default function PublishPage() {
   );
   const [showTypeDetail, setShowTypeDetail] = useState(false);
   const [data, setData] = useState<PublishPayload | null>(null);
+  const [printData, setPrintData] = useState<PublishPayload | null>(null);
+  const [printBusy, setPrintBusy] = useState(false);
+  const [printProgress, setPrintProgress] = useState("");
+  const printReadyWaiter = useRef<
+    ((info: { pageCount: number; total: number }) => void) | null
+  >(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [queried, setQueried] = useState(false);
@@ -295,6 +309,33 @@ export default function PublishPage() {
 
   const selected = nameHits.find((h) => h.id === personId) || null;
 
+  useEffect(() => {
+    if (mode !== "branch" || !group.trim()) {
+      setBranchMatch(null);
+      return;
+    }
+    const g = group.trim();
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const sp = new URLSearchParams({
+            mode: "branch",
+            group: g,
+            countOnly: "1",
+          });
+          const res = await fetch(`/api/publish?${sp}`);
+          const json = await res.json();
+          if (res.ok) {
+            setBranchMatch(Number(json.matchedTotal ?? json.total) || 0);
+          }
+        } catch {
+          setBranchMatch(null);
+        }
+      })();
+    }, 280);
+    return () => window.clearTimeout(t);
+  }, [mode, group]);
+
   const filteredHits = useMemo(() => {
     return nameHits.filter((h) => {
       if (hitFilter.sex && h.sex !== hitFilter.sex) return false;
@@ -323,9 +364,140 @@ export default function PublishPage() {
     if (limitPreset === "all") return "all";
     if (limitPreset === "custom") {
       const n = Number(String(customLimit).replace(/\D/g, ""));
-      return String(Math.max(1, n || 100));
+      return String(Math.min(PUBLISH_BRANCH_MAX, Math.max(1, n || 100)));
     }
     return limitPreset;
+  }
+
+  function resolveOffset(): number {
+    const n = Number(String(branchStart).replace(/\D/g, ""));
+    return Math.max(0, (Number.isFinite(n) && n > 0 ? n : 1) - 1);
+  }
+
+  const onPrintLayoutReady = useCallback(
+    (info: { pageCount: number; total: number }) => {
+      printReadyWaiter.current?.(info);
+    },
+    [],
+  );
+
+  async function fetchBranchChunk(
+    g: string,
+    limit: number,
+    offset: number,
+  ): Promise<PublishPayload> {
+    const sp = new URLSearchParams({
+      mode: "branch",
+      group: g,
+      limit: String(limit),
+    });
+    if (offset > 0) sp.set("offset", String(offset));
+    const res = await fetch(`/api/publish?${sp}`);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || `收录失败（${res.status}）`);
+    return json as PublishPayload;
+  }
+
+  async function collectPrintPayload(
+    preview: PublishPayload,
+  ): Promise<PublishPayload> {
+    if (preview.mode !== "branch") return preview;
+    const g = group.trim();
+    if (!g) return preview;
+    const start = preview.offset || 0;
+    const matched = preview.matchedTotal ?? preview.total;
+    const already = preview.total;
+    const remain = Math.max(0, matched - start - already);
+    if (remain <= 0) return preview;
+
+    const cap = Math.min(PUBLISH_PRINT_MAX, start + already + remain) - start;
+    const parts: PublishPayload[] = [preview];
+    let loaded = already;
+    while (loaded < cap) {
+      const take = Math.min(PUBLISH_BRANCH_MAX, cap - loaded);
+      setPrintProgress(`正在收录打印稿 ${start + loaded + 1}–${start + loaded + take} 人…`);
+      const chunk = await fetchBranchChunk(g, take, start + loaded);
+      if (!chunk.total) break;
+      parts.push(chunk);
+      loaded += chunk.total;
+      if (chunk.total < take) break;
+    }
+    return mergePublishPayloads(parts);
+  }
+
+  function triggerBrowserPrint(payload: PublishPayload) {
+    const prev = document.title;
+    document.title = buildPrintDocumentTitle(payload, {
+      personName,
+      group,
+    });
+    const restore = () => {
+      document.title = prev;
+      window.removeEventListener("afterprint", restore);
+    };
+    window.addEventListener("afterprint", restore);
+    window.print();
+    window.setTimeout(restore, 1500);
+  }
+
+  async function handlePrintOrPdf() {
+    if (!data || printBusy) return;
+    setError("");
+    const needMore =
+      data.mode === "branch" &&
+      (data.matchedTotal ?? data.total) > data.total;
+    if (!needMore) {
+      triggerBrowserPrint(data);
+      return;
+    }
+    const matched = data.matchedTotal ?? data.total;
+    const willTake = Math.min(PUBLISH_PRINT_MAX, matched - (data.offset || 0));
+    if (
+      willTake > data.total &&
+      !window.confirm(
+        `预览仅 ${data.total} 人；打印将再收录该支其余成员（本次最多 ${willTake} 人 / 共约 ${matched} 人）。人数多时可能较慢，确定继续？`,
+      )
+    ) {
+      return;
+    }
+    setPrintBusy(true);
+    setPrintProgress("正在准备打印稿…");
+    try {
+      const payload = await collectPrintPayload(data);
+      if (
+        payload === data ||
+        (printData && printData.total === payload.total && printData.offset === payload.offset)
+      ) {
+        setPrintData(payload);
+        triggerBrowserPrint(payload);
+        return;
+      }
+      const ready = new Promise<{ pageCount: number; total: number }>(
+        (resolve) => {
+          printReadyWaiter.current = resolve;
+          window.setTimeout(() => resolve({ pageCount: 0, total: payload.total }), 15000);
+        },
+      );
+      setPrintData(payload);
+      setPrintProgress(`正在排版 ${payload.total} 人…`);
+      await ready;
+      printReadyWaiter.current = null;
+      await new Promise<void>((r) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => r()));
+      });
+      triggerBrowserPrint(payload);
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : "打印准备失败";
+      setError(
+        /failed to fetch|networkerror|load failed/i.test(raw)
+          ? `打印收录超时。请改小「从第几人起」后分段打印（单次最多 ${PUBLISH_PRINT_MAX} 人）。`
+          : raw,
+      );
+    } finally {
+      setPrintBusy(false);
+      setPrintProgress("");
+      printReadyWaiter.current = null;
+    }
   }
 
   function pickPerson(id: number) {
@@ -380,14 +552,22 @@ export default function PublishPage() {
         if (!group.trim()) throw new Error("请选择派户支");
         sp.set("group", group.trim());
         sp.set("limit", resolveLimit());
+        const off = resolveOffset();
+        if (off > 0) sp.set("offset", String(off));
       }
       const res = await fetch(`/api/publish?${sp}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "查询失败");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `查询失败（${res.status}）`);
+      setPrintData(null);
       setData(json as PublishPayload);
     } catch (e) {
       setData(null);
-      setError(e instanceof Error ? e.message : "查询失败");
+      const raw = e instanceof Error ? e.message : "查询失败";
+      setError(
+        /failed to fetch|networkerror|load failed/i.test(raw)
+          ? `人数过多或请求超时。大派请分段收录（单次最多 ${PUBLISH_BRANCH_MAX} 人），可先选 200 人试排。`
+          : raw,
+      );
     } finally {
       setLoading(false);
     }
@@ -405,6 +585,8 @@ export default function PublishPage() {
     setDown(3);
     setLimitPreset("100");
     setCustomLimit("400");
+    setBranchStart("1");
+    setBranchMatch(null);
     setPaperPreset("A4");
     setCustomPaperW(String(DEFAULT_PAPER.widthMm));
     setCustomPaperH(String(DEFAULT_PAPER.heightMm));
@@ -428,6 +610,7 @@ export default function PublishPage() {
     );
     setShowTypeDetail(false);
     setData(null);
+    setPrintData(null);
     setError("");
     setQueried(false);
   }
@@ -441,25 +624,15 @@ export default function PublishPage() {
           actions={
             data ? (
               <Button
-                onClick={() => {
-                  const prev = document.title;
-                  // 另存 PDF 时浏览器多用 title 作默认文件名（人物姓名或派户支）
-                  document.title = buildPrintDocumentTitle(data, {
-                    personName,
-                    group,
-                  });
-                  const restore = () => {
-                    document.title = prev;
-                    window.removeEventListener("afterprint", restore);
-                  };
-                  window.addEventListener("afterprint", restore);
-                  window.print();
-                  // 部分浏览器不触发 afterprint，稍后还原
-                  window.setTimeout(restore, 1500);
-                }}
-                disabled={loading}
+                onClick={() => void handlePrintOrPdf()}
+                disabled={loading || printBusy}
               >
-                打印 / 另存 PDF
+                {printBusy
+                  ? printProgress || "准备打印…"
+                  : data.mode === "branch" &&
+                      (data.matchedTotal ?? 0) > data.total
+                    ? "打印全部 / 另存 PDF"
+                    : "打印 / 另存 PDF"}
               </Button>
             ) : null
           }
@@ -656,16 +829,36 @@ export default function PublishPage() {
                         value={customLimit}
                         inputMode="numeric"
                         onChange={(e) =>
-                          setCustomLimit(e.target.value.replace(/\D/g, ""))
+                          setCustomLimit(
+                            e.target.value.replace(/\D/g, "").slice(0, 5),
+                          )
                         }
                         placeholder="400"
                       />
                       <span className="text-xs text-muted">人</span>
                     </div>
                   ) : null}
+                  <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-white px-2 py-1">
+                    <span className="text-xs text-muted">从第</span>
+                    <input
+                      className="w-16 bg-transparent text-center text-sm outline-none"
+                      value={branchStart}
+                      inputMode="numeric"
+                      onChange={(e) =>
+                        setBranchStart(
+                          e.target.value.replace(/\D/g, "").slice(0, 6) || "1",
+                        )
+                      }
+                    />
+                    <span className="text-xs text-muted">人起</span>
+                  </div>
                 </div>
                 <p className="mt-1.5 text-xs text-muted">
-                  大派户支可选「全部」收录匹配成员；人数很多时生成与打印会较慢，请按需选择。
+                  {branchMatch != null && branchMatch > PUBLISH_PRINT_MAX
+                    ? `该支约 ${branchMatch} 人。预览用 100/200 人即可；点「打印全部」一次最多印 ${PUBLISH_PRINT_MAX} 人，其余改「从第几人起」分册。`
+                    : branchMatch != null
+                      ? `该支约 ${branchMatch} 人。预览可只收一部分，点「打印全部」再收录其余（最多 ${PUBLISH_PRINT_MAX} 人）。`
+                      : `预览用左侧人数；点「打印全部」时再收录其余成员（单次最多 ${PUBLISH_PRINT_MAX} 人）。`}
                 </p>
               </div>
             </>
@@ -1123,13 +1316,24 @@ export default function PublishPage() {
               }
               onClick={() => void runQuery()}
             >
-              {loading ? "生成中…" : "生成出版"}
+              {loading
+                ? limitPreset === "all"
+                  ? "生成中（人数较多请稍候）…"
+                  : "生成中…"
+                : "生成出版"}
             </Button>
             <Button variant="secondary" disabled={loading} onClick={reset}>
               重置
             </Button>
           </div>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
+          {data?.truncated ? (
+            <p className="text-xs text-muted">
+              该支共 {data.matchedTotal ?? "?"} 人，本次只收录了第{" "}
+              {(data.offset || 0) + 1}–{(data.offset || 0) + data.total}{" "}
+              人。其余请改「从第几人起」再生成。
+            </p>
+          ) : null}
         </Card>
 
         <Card className="publish-result-card min-w-0 overflow-hidden p-5">
@@ -1430,7 +1634,7 @@ export default function PublishPage() {
                       打印
                     </span>
                     <span className="text-muted">
-                      调用浏览器打印，可另存为 PDF
+                      预览可先收一部分人；点「打印全部」时再收录其余并另存 PDF
                     </span>
                   </li>
                 </ul>
@@ -1439,6 +1643,8 @@ export default function PublishPage() {
           ) : (
             <PublishSheet
               data={data}
+              printData={printData}
+              onPrintLayoutReady={onPrintLayoutReady}
               paper={paper}
               font={font}
               typography={typography}

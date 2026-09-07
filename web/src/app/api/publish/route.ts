@@ -2,12 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { buildPublishByBranch, buildPublishByPerson } from "@/lib/publish";
 
+export const maxDuration = 120;
+
 function parseLimit(raw: string | null): number | "all" {
   const v = (raw || "100").trim().toLowerCase();
   if (v === "all" || v === "全部") return "all";
   const n = Number(v);
   if (!Number.isFinite(n)) return 100;
   return Math.max(1, Math.floor(n));
+}
+
+function parseOffset(raw: string | null): number {
+  const n = Number(raw || 0);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n);
 }
 
 export async function GET(req: NextRequest) {
@@ -22,7 +30,9 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "请选择派户支" }, { status: 400 });
       }
       const limit = parseLimit(sp.get("limit"));
-      const data = await buildPublishByBranch(group, limit);
+      const offset = parseOffset(sp.get("offset"));
+      const countOnly = sp.get("countOnly") === "1";
+      const data = await buildPublishByBranch(group, limit, offset, countOnly);
       return NextResponse.json(data);
     }
 

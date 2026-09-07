@@ -153,6 +153,43 @@ function pagesSignature(pages: PageColumns[]): string {
     .join("|");
 }
 
+function packFromMeasure(
+  items: FlatEntry[],
+  box: HTMLElement | null,
+  probe: HTMLElement | null,
+  paper: PaperSize,
+): PageColumns[] {
+  if (!items.length) return [];
+  if (!probe || !box) return [[items]];
+  const pageHeight = box.clientHeight || paperSizePx(paper).heightPx * 0.9;
+  const pageEl = probe.closest(".publish-page");
+  const spineEl = pageEl?.querySelector(".publish-spine") as HTMLElement | null;
+  const spineW = spineEl ? spineEl.getBoundingClientRect().width || 44 : 44;
+  const framePad = 24;
+  const fullW = paperSizePx(paper).widthPx;
+  let pageWidth = probe.clientWidth || 0;
+  if (pageWidth < 80) {
+    pageWidth = Math.max(120, fullW - spineW - framePad);
+  }
+  const nodes = [...box.querySelectorAll<HTMLElement>(".publish-person")];
+  const heights = nodes.map((n) => {
+    const r = n.getBoundingClientRect();
+    return r.height > 1 ? r.height : n.offsetHeight || 24;
+  });
+  const widths = nodes
+    .map((n) => {
+      const r = n.getBoundingClientRect();
+      return r.width > 1 ? r.width : n.offsetWidth || 0;
+    })
+    .filter((w) => w > 8 && w < pageWidth * 0.5);
+  const sorted = [...widths].sort((a, b) => a - b);
+  const personWidth =
+    sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.85))] ||
+    sorted[0] ||
+    40;
+  return packPages(items, heights, personWidth, pageWidth, pageHeight, 18);
+}
+
 function computePreviewScale(paper: PaperSize): number {
   if (typeof window === "undefined") return 0.55;
   const { widthPx, heightPx } = paperSizePx(paper);
@@ -219,22 +256,36 @@ function PageSheet({
 
 export function PublishSheet({
   data,
+  printData,
+  onPrintLayoutReady,
   emptyHint,
   paper = DEFAULT_PAPER,
   font = DEFAULT_FONT,
   typography = DEFAULT_TYPOGRAPHY,
 }: {
   data: PublishPayload | null;
+  /** 打印用全量（可多于预览）；缺省则打印预览同一批 */
+  printData?: PublishPayload | null;
+  onPrintLayoutReady?: (info: { pageCount: number; total: number }) => void;
   emptyHint?: string;
   paper?: PaperSize;
   font?: PublishFont;
   typography?: PublishTypography;
 }) {
   const flat = useMemo(() => (data ? flattenEntries(data) : []), [data]);
+  const printFlat = useMemo(
+    () => (printData ? flattenEntries(printData) : flat),
+    [printData, flat],
+  );
+  const printSeparate = Boolean(printData && printData !== data);
   const measureRef = useRef<HTMLDivElement>(null);
   const widthProbeRef = useRef<HTMLDivElement>(null);
+  const printMeasureRef = useRef<HTMLDivElement>(null);
+  const printProbeRef = useRef<HTMLDivElement>(null);
   const pagesSigRef = useRef("");
+  const printSigRef = useRef("");
   const [pages, setPages] = useState<PageColumns[]>([]);
+  const [printPages, setPrintPages] = useState<PageColumns[]>([]);
   const [previewScale, setPreviewScale] = useState(0.55);
   const [pageIndex, setPageIndex] = useState(0);
   const paperKey = `${paper.widthMm}x${paper.heightMm}`;
@@ -270,60 +321,11 @@ export function PublishSheet({
 
     const measure = () => {
       if (cancelled) return;
-      const probe = widthProbeRef.current;
-      const box = measureRef.current;
-      if (!probe || !box) {
-        const fallback: PageColumns[] = [[flat]];
-        const sig = pagesSignature(fallback);
-        if (sig !== pagesSigRef.current) {
-          pagesSigRef.current = sig;
-          setPages(fallback);
-        }
-        return;
-      }
-
-      // 按真实纸张版心（1:1）装箱，与打印一致
-      const pageHeight = box.clientHeight || paperSizePx(paper).heightPx * 0.9;
-      const pageEl = probe.closest(".publish-page");
-      const spineEl = pageEl?.querySelector(
-        ".publish-spine",
-      ) as HTMLElement | null;
-      const spineW = spineEl
-        ? spineEl.getBoundingClientRect().width || 44
-        : 44;
-      const framePad = 24;
-      const fullW = paperSizePx(paper).widthPx;
-      let pageWidth = probe.clientWidth || 0;
-      if (pageWidth < 80) {
-        pageWidth = Math.max(120, fullW - spineW - framePad);
-      }
-
-      const nodes = [
-        ...box.querySelectorAll<HTMLElement>(".publish-person"),
-      ];
-      const heights = nodes.map((n) => {
-        const r = n.getBoundingClientRect();
-        return r.height > 1 ? r.height : n.offsetHeight || 24;
-      });
-      const widths = nodes
-        .map((n) => {
-          const r = n.getBoundingClientRect();
-          return r.width > 1 ? r.width : n.offsetWidth || 0;
-        })
-        .filter((w) => w > 8 && w < pageWidth * 0.5);
-      const sorted = [...widths].sort((a, b) => a - b);
-      const personWidth =
-        sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.85))] ||
-        sorted[0] ||
-        40;
-
-      const next = packPages(
+      const next = packFromMeasure(
         flat,
-        heights,
-        personWidth,
-        pageWidth,
-        pageHeight,
-        18,
+        measureRef.current,
+        widthProbeRef.current,
+        paper,
       );
       const sig = pagesSignature(next);
       if (sig !== pagesSigRef.current) {
@@ -355,7 +357,64 @@ export function PublishSheet({
     };
   }, [flat, layoutKey, paper]);
 
+  useLayoutEffect(() => {
+    if (!printSeparate) {
+      printSigRef.current = "";
+      setPrintPages([]);
+      return;
+    }
+    if (!printFlat.length) {
+      printSigRef.current = "";
+      setPrintPages([]);
+      onPrintLayoutReady?.({ pageCount: 0, total: 0 });
+      return;
+    }
+
+    let cancelled = false;
+    const measure = () => {
+      if (cancelled) return;
+      const next = packFromMeasure(
+        printFlat,
+        printMeasureRef.current,
+        printProbeRef.current,
+        paper,
+      );
+      const sig = pagesSignature(next);
+      if (sig !== printSigRef.current) {
+        printSigRef.current = sig;
+        setPrintPages(next);
+      }
+      onPrintLayoutReady?.({
+        pageCount: next.length,
+        total: printFlat.length,
+      });
+    };
+    const raf = window.requestAnimationFrame(measure);
+    let fontTimer: number | undefined;
+    if (document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (!cancelled) window.requestAnimationFrame(measure);
+      });
+    } else {
+      fontTimer = window.setTimeout(() => {
+        if (!cancelled) measure();
+      }, 160);
+    }
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+      if (fontTimer) window.clearTimeout(fontTimer);
+    };
+  }, [printSeparate, printFlat, layoutKey, paper, onPrintLayoutReady]);
+
   const displayPages = pages.length ? pages : flat.length ? [[flat]] : [];
+  const stackedPages = printSeparate
+    ? printPages.length
+      ? printPages
+      : printFlat.length
+        ? [[printFlat]]
+        : displayPages
+    : displayPages;
   const pageCount = Math.max(1, displayPages.length);
 
   useEffect(() => {
@@ -421,7 +480,7 @@ export function PublishSheet({
         {data.subtitle} · 共 {data.total} 人 · {pageCount} 页 · {paperTag} ·{" "}
         {font.label} · {typographySummary(typography)}
         <span className="mt-1 block text-xs">
-          预览按真实纸张比例缩小；可用左右箭头或底部按钮翻页。打印时请选「边距：无」，纸张选{" "}
+          预览只排当前收录；点「打印 / 另存 PDF」会再拉该支其余成员后出 PDF。打印时请选「边距：无」，纸张选{" "}
           {paper.label}
           {paper.id === "custom"
             ? `（${paper.widthMm}×${paper.heightMm}mm）`
@@ -442,6 +501,24 @@ export function PublishSheet({
           </div>
         </section>
       </div>
+
+      {printSeparate ? (
+        <div className="publish-measure no-print" aria-hidden>
+          <section className="publish-page publish-page-probe">
+            <aside className="publish-spine" />
+            <div ref={printProbeRef} className="publish-frame">
+              <div
+                ref={printMeasureRef}
+                className="publish-body publish-body-measure"
+              >
+                {printFlat.map((entry) => (
+                  <PersonStrip key={`pm-${entry.id}`} entry={entry} />
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {/* 屏显：左右翻页 */}
       <div className="publish-flip no-print flex min-h-0 flex-1 flex-col">
@@ -525,12 +602,12 @@ export function PublishSheet({
 
       {/* 打印：全部页（屏上隐藏） */}
       <div className="publish-pages publish-print-stack" aria-hidden>
-        {displayPages.map((pageColumns, idx) => (
+        {stackedPages.map((pageColumns, idx) => (
           <PageSheet
             key={`print-${idx}-${layoutKey}`}
-            title={data.title}
+            title={(printData || data).title}
             pageIndex={idx}
-            pageCount={pageCount}
+            pageCount={Math.max(1, stackedPages.length)}
             columns={pageColumns}
             paperTag={paperTag}
           />
