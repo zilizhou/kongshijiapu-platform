@@ -22,6 +22,7 @@ import {
 } from "@/lib/paper";
 import {
   mergePublishPayloads,
+  PUBLISH_ALL_PREVIEW,
   PUBLISH_BRANCH_MAX,
   PUBLISH_PRINT_MAX,
   type PublishPayload,
@@ -264,6 +265,8 @@ export default function PublishPage() {
   const [showTypeDetail, setShowTypeDetail] = useState(false);
   const [data, setData] = useState<PublishPayload | null>(null);
   const [printData, setPrintData] = useState<PublishPayload | null>(null);
+  /** 本次生成勾选了「全部」：预览 200 人，打印再收全量 */
+  const [wantPrintAll, setWantPrintAll] = useState(false);
   const [printBusy, setPrintBusy] = useState(false);
   const [printProgress, setPrintProgress] = useState("");
   const printReadyWaiter = useRef<
@@ -360,8 +363,8 @@ export default function PublishPage() {
   const showNamePicker =
     mode === "person" && nameSearched && nameHits.length > 0 && !data && !queried;
 
-  function resolveLimit(): string {
-    if (limitPreset === "all") return "all";
+  function resolvePreviewLimit(): string {
+    if (limitPreset === "all") return String(PUBLISH_ALL_PREVIEW);
     if (limitPreset === "custom") {
       const n = Number(String(customLimit).replace(/\D/g, ""));
       return String(Math.min(PUBLISH_BRANCH_MAX, Math.max(1, n || 100)));
@@ -445,6 +448,7 @@ export default function PublishPage() {
     setError("");
     const needMore =
       data.mode === "branch" &&
+      wantPrintAll &&
       (data.matchedTotal ?? data.total) > data.total;
     if (!needMore) {
       triggerBrowserPrint(data);
@@ -545,13 +549,16 @@ export default function PublishPage() {
       const sp = new URLSearchParams({ mode });
       if (mode === "person") {
         if (!personId) throw new Error("请先查找并选择一位同名成员");
+        setWantPrintAll(false);
         sp.set("personId", String(personId));
         sp.set("up", String(up));
         sp.set("down", String(down));
       } else {
         if (!group.trim()) throw new Error("请选择派户支");
         sp.set("group", group.trim());
-        sp.set("limit", resolveLimit());
+        const printAll = limitPreset === "all";
+        setWantPrintAll(printAll);
+        sp.set("limit", resolvePreviewLimit());
         const off = resolveOffset();
         if (off > 0) sp.set("offset", String(off));
       }
@@ -587,6 +594,7 @@ export default function PublishPage() {
     setCustomLimit("400");
     setBranchStart("1");
     setBranchMatch(null);
+    setWantPrintAll(false);
     setPaperPreset("A4");
     setCustomPaperW(String(DEFAULT_PAPER.widthMm));
     setCustomPaperH(String(DEFAULT_PAPER.heightMm));
@@ -629,7 +637,8 @@ export default function PublishPage() {
               >
                 {printBusy
                   ? printProgress || "准备打印…"
-                  : data.mode === "branch" &&
+                  : wantPrintAll &&
+                      data.mode === "branch" &&
                       (data.matchedTotal ?? 0) > data.total
                     ? "打印全部 / 另存 PDF"
                     : "打印 / 另存 PDF"}
@@ -654,6 +663,7 @@ export default function PublishPage() {
               onClick={() => {
                 setMode("person");
                 setData(null);
+                setWantPrintAll(false);
                 setQueried(false);
               }}
             >
@@ -854,11 +864,9 @@ export default function PublishPage() {
                   </div>
                 </div>
                 <p className="mt-1.5 text-xs text-muted">
-                  {branchMatch != null && branchMatch > PUBLISH_PRINT_MAX
-                    ? `该支约 ${branchMatch} 人。预览用 100/200 人即可；点「打印全部」一次最多印 ${PUBLISH_PRINT_MAX} 人，其余改「从第几人起」分册。`
-                    : branchMatch != null
-                      ? `该支约 ${branchMatch} 人。预览可只收一部分，点「打印全部」再收录其余（最多 ${PUBLISH_PRINT_MAX} 人）。`
-                      : `预览用左侧人数；点「打印全部」时再收录其余成员（单次最多 ${PUBLISH_PRINT_MAX} 人）。`}
+                  {limitPreset === "all"
+                    ? `选「全部」时先预览 ${PUBLISH_ALL_PREVIEW} 人，点「打印全部」再收录其余（单次最多 ${PUBLISH_PRINT_MAX} 人）。${branchMatch != null ? `该支约 ${branchMatch} 人。` : ""}`
+                    : `选 100 / 200 / 自定义时，预览和打印都只出这些人。${branchMatch != null ? `该支约 ${branchMatch} 人。` : ""}`}
                 </p>
               </div>
             </>
@@ -1316,22 +1324,16 @@ export default function PublishPage() {
               }
               onClick={() => void runQuery()}
             >
-              {loading
-                ? limitPreset === "all"
-                  ? "生成中（人数较多请稍候）…"
-                  : "生成中…"
-                : "生成出版"}
+              {loading ? "生成中…" : "生成出版"}
             </Button>
             <Button variant="secondary" disabled={loading} onClick={reset}>
               重置
             </Button>
           </div>
           {error ? <p className="text-sm text-danger">{error}</p> : null}
-          {data?.truncated ? (
+          {wantPrintAll && data?.truncated ? (
             <p className="text-xs text-muted">
-              该支共 {data.matchedTotal ?? "?"} 人，本次只收录了第{" "}
-              {(data.offset || 0) + 1}–{(data.offset || 0) + data.total}{" "}
-              人。其余请改「从第几人起」再生成。
+              预览 {data.total} 人（该支共 {data.matchedTotal ?? "?"} 人）。点「打印全部」再收录其余。
             </p>
           ) : null}
         </Card>
@@ -1634,7 +1636,7 @@ export default function PublishPage() {
                       打印
                     </span>
                     <span className="text-muted">
-                      预览可先收一部分人；点「打印全部」时再收录其余并另存 PDF
+                      选「全部」先预览 200 人，打印时再收全量；选固定人数则预览和打印一致
                     </span>
                   </li>
                 </ul>

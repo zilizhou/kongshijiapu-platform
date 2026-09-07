@@ -37,6 +37,8 @@ export type PublishPayload = {
 
 /** 单次按派户支收录上限，避免「全部」把请求/浏览器撑死 */
 export const PUBLISH_BRANCH_MAX = 2000;
+/** 选「全部」时预览人数 */
+export const PUBLISH_ALL_PREVIEW = 200;
 /** 点打印时再拉全量的单次上限（预览仍用较少人数） */
 export const PUBLISH_PRINT_MAX = 4000;
 

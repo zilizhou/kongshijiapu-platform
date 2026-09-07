@@ -480,7 +480,7 @@ export function PublishSheet({
         {data.subtitle} · 共 {data.total} 人 · {pageCount} 页 · {paperTag} ·{" "}
         {font.label} · {typographySummary(typography)}
         <span className="mt-1 block text-xs">
-          预览只排当前收录；点「打印 / 另存 PDF」会再拉该支其余成员后出 PDF。打印时请选「边距：无」，纸张选{" "}
+          预览按真实纸张比例缩小；可用左右箭头或底部按钮翻页。打印时请选「边距：无」，纸张选{" "}
           {paper.label}
           {paper.id === "custom"
             ? `（${paper.widthMm}×${paper.heightMm}mm）`
