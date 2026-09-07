@@ -25,7 +25,7 @@ import {
   PUBLISH_BRANCH_MAX,
   PUBLISH_PRINT_MAX,
   type PublishPayload,
-} from "@/lib/publish";
+} from "@/lib/publishModel";
 import {
   clampDetailRem,
   clampNameRatio,

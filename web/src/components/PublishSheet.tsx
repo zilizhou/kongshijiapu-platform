@@ -8,7 +8,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import type { PublishEntry, PublishPayload } from "@/lib/publish";
+import type { PublishEntry, PublishPayload } from "@/lib/publishModel";
 import {
   DEFAULT_PAPER,
   paperCssVars,
